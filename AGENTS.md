@@ -180,8 +180,10 @@ other signalk-espOS repositories, and `package.json` says `"license":
   everything Vite bundles into `public/` ship to users, so a
   devDependency the webapp imports (React, for one) is distributed too.
   Re-check licences before adding either kind.
-- `signalk-derived-data` is a **peer** dependency (Apache-2.0), installed
-  by the user rather than bundled.
+- No peer dependencies. The panel's day/night dimming reads
+  `environment.mode`, which signalk-espos-manager publishes (computed with
+  `@openwaters/almanac`), so the package recommends the manager rather than
+  signalk-derived-data.
 
 ## Repo conventions
 
