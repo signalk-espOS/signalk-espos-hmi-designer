@@ -251,11 +251,11 @@ jobs:
             echo "${version} is already on npm"
             exit 0
           fi
-          if [[ "$TAG" == *alpha* ]]; then
+          if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-alpha(\.|[+]|$) ]]; then
             npm publish --provenance --access public --ignore-scripts --tag alpha
-          elif [[ "$TAG" == *beta* ]]; then
+          elif [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta(\.|[+]|$) ]]; then
             npm publish --provenance --access public --ignore-scripts --tag beta
-          elif [[ "$TAG" == *rc* ]]; then
+          elif [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc(\.|[+]|$) ]]; then
             npm publish --provenance --access public --ignore-scripts --tag rc
           elif [ "$IS_LATEST" = "true" ]; then
             npm publish --provenance --access public --ignore-scripts
