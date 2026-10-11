@@ -197,8 +197,15 @@ other signalk-espOS repositories, and `package.json` says `"license":
 - **PR style**: Angular-style title, succinct body, no boilerplate
   test plans, only mention tests actually performed. No AI
   attribution anywhere.
-- **No release-flow work** (version bumps, tags) unless the user says
-  release.
+- **Releases**: release-please (`.github/workflows/publish.yml`) keeps a
+  `chore: release x.y.z` PR open on master; merging it tags the release
+  and publishes npm. Release notes are the PR titles, sorted by the label
+  `label-by-title.yml` sets from the title's type (`.github/release.yml`).
+  Only `feat`, `fix`, `perf`, `revert`, a breaking change, `build(deps)` or
+  a `Release-As:` footer refreshes the release PR. Never bump the version
+  or push a release tag by hand.
+- **No release-flow work** (merging the release PR, version bumps, tags)
+  unless the user says release.
 - **Code review**: `cr review --plain --type committed --base master`
   on a feature branch. Save output the first time; `cr` is
   rate-limited ~50 min between runs.
