@@ -42,7 +42,7 @@
       "description": "Drag-and-drop layout designer for runtime-rendering HMI displays"
     },
     "recommends": [
-      "signalk-derived-data",
+      "signalk-espos-manager",
       "signalk-n2k-switching"
     ]
   },
@@ -74,14 +74,6 @@
     "@signalk/server-api": "*",
     "bonjour-service": "^1.4.4",
     "express": "^5.2.1"
-  },
-  "peerDependencies": {
-    "signalk-derived-data": ">=1.45.0"
-  },
-  "peerDependenciesMeta": {
-    "signalk-derived-data": {
-      "optional": true
-    }
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
