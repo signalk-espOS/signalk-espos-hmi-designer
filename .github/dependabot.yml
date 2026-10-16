@@ -16,6 +16,10 @@ updates:
       # within the v22.x line; ignore v23+.
       - dependency-name: '@types/node'
         versions: ['>=23']
+      # typescript-eslint's peer range stops below 6.1, so npm ci refuses
+      # anything newer. Lift this once typescript-eslint supports TS 7.
+      - dependency-name: typescript
+        versions: ['>=6.1.0']
 
   - package-ecosystem: github-actions
     directory: '/'
