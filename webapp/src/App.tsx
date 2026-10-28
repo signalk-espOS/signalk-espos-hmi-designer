@@ -626,7 +626,7 @@ export function App(): React.JSX.Element {
     let cancelled = false
     // Minimum gap between the START of one screenshot fetch and the
     // next. Each /screenshot on the device takes an lv_snapshot +
-    // JPEG encode on its single LVGL/event_loop task (~hundreds of
+    // JPEG encode on its single LVGL (UI) task (~hundreds of
     // ms). Polling with no gap pins that task at 100% and starves
     // everything else on it — most visibly, a concurrent push times
     // out ("device proxy 504"). 750 ms keeps the mirror feeling live

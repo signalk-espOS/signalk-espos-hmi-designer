@@ -4,7 +4,7 @@ npm package: `signalk-espos-hmi-designer` (formerly `signalk-hmi-designer`).
 
 A SignalK webapp that designs HMI layouts for **runtime-rendering display devices** — boards that load a JSON layout at runtime and bind widgets to SignalK paths, without a firmware rebuild per change.
 
-Reference target: [sensesp-p4-cockpit](https://github.com/dirkwa/sensesp-p4-cockpit)'s JLP (JSON Layout Player) on the ESP32-P4 / Waveshare 7B panel. Any device that implements the same `GET /hello` + `POST /layout` contract works.
+Reference target: [espos-p4-cockpit](https://github.com/dirkwa/espos-p4-cockpit)'s JLP (JSON Layout Player) on the ESP32-P4 / Waveshare 7B panel. Any device that implements the same `GET /hello` + `POST /layout` contract works.
 
 ## What it does
 
@@ -86,7 +86,7 @@ The designer assumes the device exposes (default port 8081 on the reference firm
 | GET    | `/screenshot` | Default JPEG, `?fmt=bmp` legacy RGB565 (used by Mirror preview)                  |
 | GET    | `/healthz`    | Liveness probe                                                                   |
 
-The full contract is documented in the firmware repo: [JLP-PROTOCOL.md](https://github.com/dirkwa/sensesp-p4-cockpit/blob/master/JLP-PROTOCOL.md).
+The full contract is documented in the firmware repo: [JLP-PROTOCOL.md](https://github.com/dirkwa/espos-p4-cockpit/blob/main/JLP-PROTOCOL.md).
 
 ## Plugin HTTP endpoints
 

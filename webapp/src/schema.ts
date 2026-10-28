@@ -1,5 +1,5 @@
-// Mirror of the JLP device-side schema v1 (sensesp-p4-cockpit
-// src/jlp/widgets/widget_factory.cpp). Kept here as the single
+// Mirror of the JLP device-side schema v1 (espos-p4-cockpit
+// main/jlp/widgets/widget_factory.cpp). Kept here as the single
 // source of truth on the designer side; the runtime /hello response
 // from the device adds the authoritative widget catalog.
 
