@@ -2,7 +2,7 @@
 
 A SignalK webapp + plugin that designs **JSON Layouts** for runtime-
 rendering display devices and pushes them over HTTP. Reference target
-is [sensesp-p4-cockpit](https://github.com/dirkwa/sensesp-p4-cockpit)
+is [espos-p4-cockpit](https://github.com/dirkwa/espos-p4-cockpit)
 running the JLP (JSON Layout Player) on an ESP32-P4 / Waveshare 7B.
 Any device that honours the same `GET /hello` + `POST /layout`
 contract works.
