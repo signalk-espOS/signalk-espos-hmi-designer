@@ -1,6 +1,6 @@
 {
   "name": "signalk-espos-hmi-designer",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "SignalK webapp that designs HMI layouts (JSON) for runtime-rendering display devices",
   "main": "plugin/index.js",
   "type": "module",
