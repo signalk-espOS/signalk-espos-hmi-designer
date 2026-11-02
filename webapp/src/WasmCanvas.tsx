@@ -52,11 +52,13 @@ const loadModule = async (
     // runtime the file sits next to index.html (when served by the
     // signalk-server) under /signalk-espos-hmi-designer/wasm/.
     // The base path is derived from the document so it works both in
-    // `npm run dev` and in production.
-    const base =
-      typeof document !== 'undefined'
-        ? new URL('./wasm/jlp_wasm.js', document.baseURI).href
-        : './wasm/jlp_wasm.js'
+    // `npm run dev` and in production. No bare relative string may reach
+    // the import: Vite 8.3.5 tries to resolve one at build time despite
+    // @vite-ignore, and the file only exists in public/.
+    const base = new URL(
+      './wasm/jlp_wasm.js',
+      typeof document !== 'undefined' ? document.baseURI : 'file:///'
+    ).href
     const imported = (await import(/* @vite-ignore */ base)) as {
       default: (opts: unknown) => Promise<JlpWasmModule>
     }
