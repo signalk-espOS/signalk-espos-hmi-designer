@@ -3,7 +3,7 @@
 #
 # Calls the shared SignalK reusable workflow which tests this
 # plugin across Linux x64, Linux arm64, macOS, and Windows.
-# Node 24 and 26; Node 22 is no longer tested.
+# Node 24 (matches package.json engines) plus 26.
 # ─────────────────────────────────────────────────────────────
 
 name: SignalK Plugin CI
