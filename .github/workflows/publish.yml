@@ -2,7 +2,8 @@
 # to master that carries a change users get (the gate below) refreshes a
 # "chore: release x.y.z" pull request carrying the package.json bump, and
 # merging that PR tags the release, creates the GitHub Release and publishes
-# the package to npm. feat bumps minor, fix bumps patch, a `!` bumps major.
+# the package to npm. feat bumps minor, fix bumps patch, and a `!` bumps
+# minor while the version is below 1.0 (bump-minor-pre-major), major after.
 # The release notes are the ones GitHub generates for the pull requests since
 # the last release, each with its author and a link to it, sorted by the
 # labels label-by-title.yml sets (.github/release.yml), as in
