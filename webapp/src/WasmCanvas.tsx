@@ -16,11 +16,16 @@ import React, { useEffect, useRef, useState } from 'react'
 import type { Layout, Screen } from './schema'
 import type { MetaZone, NotificationRow } from './api'
 import type { SkValue } from './skStream'
+import {
+  resizeWasmDisplay,
+  type DisplaySize,
+  type ResizableWasm
+} from './wasmResize'
 
 // Shape of the bound emscripten module we use. We only declare what
 // we actually touch — the rest stays opaque so unrelated emscripten
 // API changes don't ripple into TypeScript build errors here.
-interface JlpWasmModule {
+interface JlpWasmModule extends ResizableWasm {
   _jlp_init: (w: number, h: number) => number
   _jlp_apply_layout: (jsonPtr: number) => number
   _jlp_set_value_float: (pathPtr: number, v: number) => void
@@ -41,6 +46,8 @@ interface JlpWasmModule {
 let modulePromise: Promise<JlpWasmModule> | null = null
 let currentCanvas: HTMLCanvasElement | null = null
 let inited = false
+// The LVGL display size, from jlp_init and every jlp_resize since.
+const wasmSize: DisplaySize = { w: 0, h: 0 }
 
 const loadModule = async (
   canvas: HTMLCanvasElement
@@ -247,6 +254,9 @@ export function WasmCanvas({
 }: WasmCanvasProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [modReady, setModReady] = useState<JlpWasmModule | null>(null)
+  // Kept so the apply status does not hide that the preview has the
+  // wrong size.
+  const sizeWarning = useRef<string | null>(null)
 
   // First mount → kick off the wasm load, then init LVGL once the
   // module resolves. Subsequent mounts (e.g. mode toggling) reuse
@@ -266,6 +276,8 @@ export function WasmCanvas({
             return
           }
           inited = true
+          wasmSize.w = displayW
+          wasmSize.h = displayH
         } else if (currentCanvas !== c) {
           // Emscripten SDL binds to one canvas at module init. We
           // can't re-bind to a different canvas after the fact, so
@@ -285,8 +297,19 @@ export function WasmCanvas({
     }
     // displayW/H only matter on first init; the module is a singleton
     // so re-running on every change is wasted work. The intentionally-
-    // empty dep array is correct here.
+    // empty dep array is correct here. Later sizes go through the
+    // resize effect below.
   }, []) // eslint-disable-line
+
+  // Follow the connected device's size. Declared before the apply effect
+  // so a size change and a layout change in the same render resize first
+  // and then rebuild at the new size.
+  useEffect(() => {
+    if (!modReady) return
+    const err = resizeWasmDisplay(modReady, wasmSize, displayW, displayH)
+    sizeWarning.current = err
+    if (err) onStatus?.(err)
+  }, [modReady, displayW, displayH, onStatus])
 
   // Re-apply the layout whenever the active screen, any of its
   // widgets, or any path meta changes. The wasm-side build is fast
@@ -333,9 +356,11 @@ export function WasmCanvas({
     // succeeds. Re-pushing every known value here is cheap and
     // covers both fresh applies and downstream value updates.
     pushAllValues(modReady, skValues)
-    onStatus?.(`${screen.widgets.length} widgets`)
+    onStatus?.(sizeWarning.current ?? `${screen.widgets.length} widgets`)
   }, [
     modReady,
+    displayW,
+    displayH,
     layout,
     activeIdx,
     pathZones,
