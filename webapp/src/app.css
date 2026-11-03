@@ -397,6 +397,20 @@ button.x { padding: 0 6px; font-size: 14px; }
   flex-direction: column;
   gap: 4px;
 }
+/* Alert overlay: one row per notification state. */
+.modal table.levels {
+  width: 100%;
+  border-collapse: collapse;
+}
+.modal table.levels th,
+.modal table.levels td {
+  padding: 4px 6px;
+  text-align: left;
+}
+.modal table.levels th {
+  color: var(--muted);
+  font-weight: normal;
+}
 /* Secondary action inside a modal: the shape of a button, no fill. */
 button.ghost {
   background: transparent;
