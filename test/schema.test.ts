@@ -4,6 +4,7 @@ import {
   isHelloResponse,
   mergeTheme,
   parseFirmwareVersion,
+  tabStripModes,
   type AnchorWidget,
   type ButtonWidget,
   type LabelWidget,
@@ -270,5 +271,29 @@ describe('layout theme', () => {
   it('mergeTheme drops the block once the last field is cleared', () => {
     expect(mergeTheme({ bg: '#000000' }, { bg: undefined })).toBeUndefined()
     expect(mergeTheme(undefined, { bg: undefined })).toBeUndefined()
+  })
+})
+
+describe('tab strip modes', () => {
+  const hello = (tab_strip?: string[]) => ({
+    schema: 1,
+    display: { w: 320, h: 240, ...(tab_strip ? { tab_strip } : {}) },
+    widgets: {}
+  })
+
+  it('offers only fixed to firmware that lists no modes', () => {
+    expect(tabStripModes(undefined)).toEqual(['fixed'])
+    expect(tabStripModes(hello())).toEqual(['fixed'])
+  })
+
+  it('offers overlay-bottom when the device lists it', () => {
+    expect(tabStripModes(hello(['fixed', 'overlay-bottom']))).toEqual([
+      'fixed',
+      'overlay-bottom'
+    ])
+  })
+
+  it('ignores modes this designer does not know', () => {
+    expect(tabStripModes(hello(['fixed', 'overlay-left']))).toEqual(['fixed'])
   })
 })

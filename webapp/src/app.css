@@ -149,6 +149,27 @@ header {
   box-sizing: border-box;
   z-index: 50;
 }
+/* Overlay strip: the tabs sit below the canvas, so the widgets under
+   the strip stay editable, and a dashed band marks where it shows. */
+.canvas-tabs.below {
+  border: 1px dashed #30363d;
+}
+.canvas-tabs-ghost {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed var(--muted);
+  background: rgba(22, 27, 34, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  color: var(--muted);
+  z-index: 40;
+  pointer-events: none;
+}
 .canvas-tabs .tab {
   flex: 1;
   background: #21262d;

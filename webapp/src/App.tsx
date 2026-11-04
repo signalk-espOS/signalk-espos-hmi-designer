@@ -33,7 +33,9 @@ import {
   parseFirmwareVersion,
   STATUS_OVERLAY_HEIGHT,
   firmwareMeets,
-  mergeTheme
+  mergeTheme,
+  tabStripModes,
+  type TabStripMode
 } from './schema'
 
 import {
@@ -67,6 +69,9 @@ import type {
 import './app.css'
 
 declare const __PLUGIN_VERSION__: string
+
+// Gap between the canvas and the tabs drawn below it for an overlay strip.
+const TAB_BELOW_GAP = 8
 
 /* ---------- helpers ---------- */
 
@@ -471,6 +476,7 @@ export function App(): React.JSX.Element {
   ])
   const [activeIdx, setActiveIdx] = useState<number>(0)
   const [statusOverlay, setStatusOverlay] = useState<boolean>(true)
+  const [tabStrip, setTabStrip] = useState<TabStripMode>('fixed')
   const [notifConfig, setNotifConfig] = useState<
     Layout['notifications'] | undefined
   >(undefined)
@@ -683,12 +689,13 @@ export function App(): React.JSX.Element {
       schema: 1,
       name: 'Designer',
       status_overlay: statusOverlay,
+      ...(tabStrip !== 'fixed' ? { tab_strip: tabStrip } : {}),
       ...(notifConfig ? { notifications: notifConfig } : {}),
       ...(displayConfig ? { display: displayConfig } : {}),
       ...(themeConfig ? { theme: themeConfig } : {}),
       screens
     }),
-    [screens, statusOverlay, notifConfig, displayConfig, themeConfig]
+    [screens, statusOverlay, tabStrip, notifConfig, displayConfig, themeConfig]
   )
 
   // Canvas dimensions track the connected device's /hello.display
@@ -701,6 +708,11 @@ export function App(): React.JSX.Element {
   // match the firmware (which hides the strip in that case).
   const tabStripHeight = DEFAULT_TAB_STRIP_HEIGHT
   const showTabStrip = screens.length > 1
+  // An overlay strip leaves the pages the full height on the device.
+  // The canvas marks where it shows and puts the editable tabs below.
+  const tabOverlay = showTabStrip && tabStrip === 'overlay-bottom'
+  const tabStripSpace = showTabStrip && !tabOverlay ? tabStripHeight : 0
+  const tabModes = useMemo(() => tabStripModes(hello), [hello])
 
   const grid = useMemo(
     () => screen.widgets.map((w) => widgetToGrid(w, colPxW)),
@@ -713,9 +725,7 @@ export function App(): React.JSX.Element {
   // portion; otherwise RGL sizes itself to the lowest existing widget's
   // row, which leaves no drop zone below.
   const maxRows = Math.floor(
-    (displayH -
-      (statusOverlay ? STATUS_OVERLAY_HEIGHT : 0) -
-      (showTabStrip ? tabStripHeight : 0)) /
+    (displayH - (statusOverlay ? STATUS_OVERLAY_HEIGHT : 0) - tabStripSpace) /
       ROW_HEIGHT
   )
   // RGL defaults margin and containerPadding to [10,10], which shifts
@@ -1431,6 +1441,7 @@ export function App(): React.JSX.Element {
     // omits has to go too, or the previous layout's settings ride along
     // into this one on the next save or push.
     setStatusOverlay(l.status_overlay ?? true)
+    setTabStrip(l.tab_strip ?? 'fixed')
     setNotifConfig(l.notifications)
     setDisplayConfig(l.display)
     setThemeConfig(l.theme)
@@ -1544,6 +1555,19 @@ export function App(): React.JSX.Element {
           : `Cannot read a version from the device firmware string ` +
               `${hello.firmware ?? '(none reported)'}. GET /hello must report ` +
               `a firmware ending in MAJOR.MINOR.PATCH (a -suffix is fine).`
+      )
+      return
+    }
+    // A panel that does not list the mode draws the strip fixed, over
+    // the bottom of pages laid out for the full height.
+    if (
+      hello &&
+      layoutDoc.tab_strip &&
+      !tabModes.includes(layoutDoc.tab_strip)
+    ) {
+      setPushErr(
+        `This panel cannot draw the tab strip as "${layoutDoc.tab_strip}". ` +
+          'Set tabs to fixed, or update the panel firmware.'
       )
       return
     }
@@ -1713,6 +1737,21 @@ export function App(): React.JSX.Element {
             />
             status bar
           </label>
+          {(tabModes.length > 1 || tabStrip !== 'fixed') && (
+            <label
+              className="topbar-toggle"
+              title="Where the tab strip sits when the layout has more than one screen. Overlay: the pages take the full height, a swipe up from the bottom edge shows the tabs."
+            >
+              tabs
+              <select
+                value={tabStrip}
+                onChange={(e) => setTabStrip(e.target.value as TabStripMode)}
+              >
+                <option value="fixed">fixed</option>
+                <option value="overlay-bottom">overlay</option>
+              </select>
+            </label>
+          )}
           {/* Preview backend. WASM (default) renders the layout via
               the firmware's widget_factory compiled to wasm. Mirror
               polls the device's /screenshot.jpeg for the real
@@ -2875,7 +2914,11 @@ export function App(): React.JSX.Element {
             style={{
               width: `${displayW}px`,
               height: `${displayH}px`,
-              backgroundSize: `${colPxW}px ${ROW_PX_H}px`
+              backgroundSize: `${colPxW}px ${ROW_PX_H}px`,
+              // Room for the editable tabs drawn below the canvas.
+              ...(tabOverlay
+                ? { marginBottom: `${tabStripHeight + TAB_BELOW_GAP}px` }
+                : {})
             }}
           >
             {statusOverlay && (
@@ -2932,7 +2975,7 @@ export function App(): React.JSX.Element {
                 top: statusOverlay ? STATUS_OVERLAY_HEIGHT : 0,
                 left: 0,
                 right: 0,
-                bottom: showTabStrip ? tabStripHeight : 0
+                bottom: tabStripSpace
               }}
             >
               <GridLayout
@@ -2986,10 +3029,23 @@ export function App(): React.JSX.Element {
                 })}
               </GridLayout>
             </div>
+            {tabOverlay && (
+              <div
+                className="canvas-tabs-ghost"
+                style={{ height: `${tabStripHeight}px` }}
+              >
+                <span>tabs: swipe up</span>
+              </div>
+            )}
             {showTabStrip && (
               <div
-                className="canvas-tabs"
-                style={{ height: `${tabStripHeight}px` }}
+                className={`canvas-tabs${tabOverlay ? ' below' : ''}`}
+                style={{
+                  height: `${tabStripHeight}px`,
+                  ...(tabOverlay
+                    ? { bottom: `-${tabStripHeight + TAB_BELOW_GAP}px` }
+                    : {})
+                }}
                 onClick={(e) => e.stopPropagation()}
               >
                 <DndContext
