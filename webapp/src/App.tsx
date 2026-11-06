@@ -1912,29 +1912,15 @@ export function App(): React.JSX.Element {
       </header>
 
       {pendingConfirm && (
-        <div className="modal-backdrop" onClick={() => setPendingConfirm(null)}>
-          <div
-            className="modal"
-            role="alertdialog"
-            aria-modal="true"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p>{pendingConfirm.message}</p>
-            <div className="modal-actions">
-              <button className="ghost" onClick={() => setPendingConfirm(null)}>
-                cancel
-              </button>
-              <button
-                onClick={() => {
-                  setPendingConfirm(null)
-                  pendingConfirm.run()
-                }}
-              >
-                {pendingConfirm.action}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          message={pendingConfirm.message}
+          action={pendingConfirm.action}
+          onCancel={() => setPendingConfirm(null)}
+          onConfirm={() => {
+            setPendingConfirm(null)
+            pendingConfirm.run()
+          }}
+        />
       )}
 
       {showNotifModal && (
@@ -3191,5 +3177,57 @@ export function App(): React.JSX.Element {
         </aside>
       </div>
     </div>
+  )
+}
+
+/**
+ * A native modal <dialog>: the browser moves focus in, keeps it there, makes
+ * the page behind inert and turns Escape into a cancel.
+ */
+function ConfirmDialog({
+  message,
+  action,
+  onCancel,
+  onConfirm
+}: {
+  message: string
+  action: string
+  onCancel: () => void
+  onConfirm: () => void
+}): React.JSX.Element {
+  const ref = useRef<HTMLDialogElement | null>(null)
+  useEffect(() => {
+    const dialog = ref.current
+    if (dialog && !dialog.open) dialog.showModal()
+    return () => dialog?.close()
+  }, [])
+  return (
+    <dialog
+      ref={ref}
+      className="modal"
+      aria-labelledby="confirm-message"
+      onCancel={(e) => {
+        e.preventDefault()
+        onCancel()
+      }}
+      onClick={(e) => {
+        // A click on the backdrop lands on the dialog itself, outside its box.
+        const box = e.currentTarget.getBoundingClientRect()
+        const outside =
+          e.clientX < box.left ||
+          e.clientX > box.right ||
+          e.clientY < box.top ||
+          e.clientY > box.bottom
+        if (e.target === e.currentTarget && outside) onCancel()
+      }}
+    >
+      <p id="confirm-message">{message}</p>
+      <div className="modal-actions">
+        <button className="ghost" autoFocus onClick={onCancel}>
+          cancel
+        </button>
+        <button onClick={onConfirm}>{action}</button>
+      </div>
+    </dialog>
   )
 }

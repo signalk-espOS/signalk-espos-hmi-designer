@@ -411,6 +411,13 @@ button.x { padding: 0 6px; font-size: 14px; }
   color: var(--muted);
   font-weight: normal;
 }
+dialog.modal {
+  border: none;
+  margin: auto;
+}
+dialog.modal::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
 /* Secondary action inside a modal: the shape of a button, no fill. */
 button.ghost {
   background: transparent;
