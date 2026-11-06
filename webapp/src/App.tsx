@@ -483,6 +483,12 @@ export function App(): React.JSX.Element {
     Layout['notifications'] | undefined
   >(undefined)
   const [showNotifModal, setShowNotifModal] = useState<boolean>(false)
+  // Asked in the page: kiosk browsers on a plotter may block window.confirm().
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    message: string
+    action: string
+    run: () => void
+  } | null>(null)
   const [displayConfig, setDisplayConfig] = useState<
     Layout['display'] | undefined
   >(undefined)
@@ -948,6 +954,9 @@ export function App(): React.JSX.Element {
   // adoptLayout for ordering reasons) can route through the same
   // migration + state-hydration path as Load / Import.
   const adoptLayoutRef = useRef<((l: Layout) => void) | null>(null)
+  // A confirmation runs after later renders; it must see their screens.
+  const screensRef = useRef(screens)
+  screensRef.current = screens
 
   const copySelected = (): void => {
     const w = screen.widgets.find((x) => x.id === selectedId)
@@ -1471,19 +1480,23 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const onLoad = async (): Promise<void> => {
+  const onLoad = (): void => {
     setFileMsg(null)
-    if (
-      !confirm('Load saved layout from SK server? Unsaved edits will be lost.')
-    )
-      return
+    setPendingConfirm({
+      message: 'Load saved layout from SK server? Unsaved edits will be lost.',
+      action: 'load',
+      run: () => void loadFromServer()
+    })
+  }
+
+  const loadFromServer = async (): Promise<void> => {
     try {
       const saved = await loadSavedLayout()
       if (!saved) {
         setFileMsg('no saved layout on server')
         return
       }
-      adoptLayout(saved)
+      adoptLayoutRef.current?.(saved)
       setFileMsg('loaded from SK server')
     } catch (e) {
       setFileMsg(`load failed: ${e instanceof Error ? e.message : String(e)}`)
@@ -1522,12 +1535,16 @@ export function App(): React.JSX.Element {
   }
 
   const onClear = (): void => {
-    if (!confirm('Clear the canvas? All screens and widgets will be removed.'))
-      return
-    setScreens([{ id: 'main', title: 'Main', widgets: [] }])
-    setActiveIdx(0)
-    setSelectedId(null)
-    setFileMsg('cleared')
+    setPendingConfirm({
+      message: 'Clear the canvas? All screens and widgets will be removed.',
+      action: 'clear',
+      run: () => {
+        setScreens([{ id: 'main', title: 'Main', widgets: [] }])
+        setActiveIdx(0)
+        setSelectedId(null)
+        setFileMsg('cleared')
+      }
+    })
   }
 
   const onPush = async (): Promise<void> => {
@@ -1840,7 +1857,7 @@ export function App(): React.JSX.Element {
           <button onClick={() => void onSave()} title="Save to SK server">
             Save
           </button>
-          <button onClick={() => void onLoad()} title="Load from SK server">
+          <button onClick={onLoad} title="Load from SK server">
             Load
           </button>
           <button onClick={onExport} title="Download JSON file">
@@ -1893,6 +1910,32 @@ export function App(): React.JSX.Element {
           )}
         </div>
       </header>
+
+      {pendingConfirm && (
+        <div className="modal-backdrop" onClick={() => setPendingConfirm(null)}>
+          <div
+            className="modal"
+            role="alertdialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p>{pendingConfirm.message}</p>
+            <div className="modal-actions">
+              <button className="ghost" onClick={() => setPendingConfirm(null)}>
+                cancel
+              </button>
+              <button
+                onClick={() => {
+                  setPendingConfirm(null)
+                  pendingConfirm.run()
+                }}
+              >
+                {pendingConfirm.action}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showNotifModal && (
         <div
@@ -3076,10 +3119,18 @@ export function App(): React.JSX.Element {
                           setActiveIdx(i)
                           setSelectedId(null)
                         }}
-                        onClose={() => {
-                          if (confirm(`Delete screen "${s.title}"?`))
-                            removeScreen(i)
-                        }}
+                        onClose={() =>
+                          setPendingConfirm({
+                            message: `Delete screen "${s.title}"?`,
+                            action: 'delete',
+                            run: () => {
+                              const idx = screensRef.current.findIndex(
+                                (x) => x.id === s.id
+                              )
+                              if (idx >= 0) removeScreen(idx)
+                            }
+                          })
+                        }
                       />
                     ))}
                   </SortableContext>
