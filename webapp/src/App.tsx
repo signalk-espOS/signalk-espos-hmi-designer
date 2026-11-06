@@ -76,7 +76,14 @@ declare const __PLUGIN_VERSION__: string
 // fixed pixel height for stability across different aspect ratios.
 const COLS = 24
 const ROW_HEIGHT = 25
-const ROW_PX_H = ROW_HEIGHT
+// A panel lower than this snaps to 4 px rows: 25 px rows leave up to
+// 24 px at the bottom of a 240 px panel unreachable, while 4 divides
+// every height a 240 px panel offers (240, 212, 184, 156).
+const SMALL_PANEL_H = 400
+const SMALL_ROW_HEIGHT = 4
+// Grid lines on a small panel every 5 rows, so 4 px snapping does not
+// fill the canvas with lines.
+const SMALL_ROW_LINES = 5
 
 // react-grid-layout 2 takes its settings as config objects instead of
 // flat props. The ones that never change live here so their identity is
@@ -286,23 +293,28 @@ interface GridSpec {
   h: number
 }
 
-function widgetToGrid(w: Widget, colPxW: number): GridSpec {
+function widgetToGrid(w: Widget, colPxW: number, rowPxH: number): GridSpec {
   return {
     i: w.id,
     x: Math.round(w.x / colPxW),
-    y: Math.round(w.y / ROW_PX_H),
+    y: Math.round(w.y / rowPxH),
     w: Math.max(1, Math.round(w.w / colPxW)),
-    h: Math.max(1, Math.round(w.h / ROW_PX_H))
+    h: Math.max(1, Math.round(w.h / rowPxH))
   }
 }
 
-function applyGrid(w: Widget, g: GLLayout, colPxW: number): Widget {
+function applyGrid(
+  w: Widget,
+  g: GLLayout,
+  colPxW: number,
+  rowPxH: number
+): Widget {
   return {
     ...w,
     x: Math.round(g.x * colPxW),
-    y: Math.round(g.y * ROW_PX_H),
+    y: Math.round(g.y * rowPxH),
     w: Math.round(g.w * colPxW),
-    h: Math.round(g.h * ROW_PX_H)
+    h: Math.round(g.h * rowPxH)
   }
 }
 
@@ -697,14 +709,17 @@ export function App(): React.JSX.Element {
   const displayW = hello?.display?.w ?? DEFAULT_DISPLAY_W
   const displayH = hello?.display?.h ?? DEFAULT_DISPLAY_H
   const colPxW = displayW / COLS
+  const rowPxH = displayH < SMALL_PANEL_H ? SMALL_ROW_HEIGHT : ROW_HEIGHT
+  const gridLinePxH =
+    rowPxH === SMALL_ROW_HEIGHT ? rowPxH * SMALL_ROW_LINES : rowPxH
   // Tab strip is rendered only when there's more than one screen, to
   // match the firmware (which hides the strip in that case).
   const tabStripHeight = DEFAULT_TAB_STRIP_HEIGHT
   const showTabStrip = screens.length > 1
 
   const grid = useMemo(
-    () => screen.widgets.map((w) => widgetToGrid(w, colPxW)),
-    [screen.widgets, colPxW]
+    () => screen.widgets.map((w) => widgetToGrid(w, colPxW, rowPxH)),
+    [screen.widgets, colPxW, rowPxH]
   )
 
   // Rows that fit the canvas: the display minus the status overlay strip
@@ -716,7 +731,7 @@ export function App(): React.JSX.Element {
     (displayH -
       (statusOverlay ? STATUS_OVERLAY_HEIGHT : 0) -
       (showTabStrip ? tabStripHeight : 0)) /
-      ROW_HEIGHT
+      rowPxH
   )
   // RGL defaults margin and containerPadding to [10,10], which shifts
   // everything by 10-20px per widget, and the canvas no longer reflects
@@ -726,12 +741,12 @@ export function App(): React.JSX.Element {
   const gridConfig = useMemo(
     () => ({
       cols: COLS,
-      rowHeight: ROW_HEIGHT,
+      rowHeight: rowPxH,
       margin: [0, 0] as const,
       containerPadding: [0, 0] as const,
       maxRows
     }),
-    [maxRows]
+    [maxRows, rowPxH]
   )
 
   // Effective layout for the WASM canvas: layoutDoc with the
@@ -741,14 +756,16 @@ export function App(): React.JSX.Element {
   const wasmLayoutDoc = useMemo<Layout>(() => {
     if (!dragPreview) return layoutDoc
     const apply = (w: Widget): Widget =>
-      w.id === dragPreview.id ? applyGrid(w, dragPreview.grid, colPxW) : w
+      w.id === dragPreview.id
+        ? applyGrid(w, dragPreview.grid, colPxW, rowPxH)
+        : w
     return {
       ...layoutDoc,
       screens: layoutDoc.screens.map((s, i) =>
         i === activeIdx ? { ...s, widgets: s.widgets.map(apply) } : s
       )
     }
-  }, [layoutDoc, dragPreview, activeIdx, colPxW])
+  }, [layoutDoc, dragPreview, activeIdx, colPxW, rowPxH])
 
   // Live SK values for any bound widget. The hook re-subscribes when
   // the set of bound paths changes. Includes top-level widget binds
@@ -814,7 +831,7 @@ export function App(): React.JSX.Element {
     setScreen((prev) => ({
       ...prev,
       widgets: prev.widgets.map((w) =>
-        w.id === newItem.i ? applyGrid(w, newItem, colPxW) : w
+        w.id === newItem.i ? applyGrid(w, newItem, colPxW, rowPxH) : w
       )
     }))
   }
@@ -2875,7 +2892,7 @@ export function App(): React.JSX.Element {
             style={{
               width: `${displayW}px`,
               height: `${displayH}px`,
-              backgroundSize: `${colPxW}px ${ROW_PX_H}px`
+              backgroundSize: `${colPxW}px ${gridLinePxH}px`
             }}
           >
             {statusOverlay && (
