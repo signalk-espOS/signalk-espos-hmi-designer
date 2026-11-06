@@ -24,6 +24,13 @@ import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 
 import { WasmCanvas } from './WasmCanvas'
+import {
+  NOTIFICATION_STATES,
+  REPEAT_OPTIONS,
+  SOUND_OPTIONS,
+  effectiveLevels,
+  withLevel
+} from './notificationLevels'
 import { useNotifications, useSkValues } from './skStream'
 import {
   DEFAULT_TAB_STRIP_HEIGHT,
@@ -62,7 +69,8 @@ import type {
   Screen,
   Widget,
   WidgetKind,
-  HelloResponse
+  HelloResponse,
+  NotificationSound
 } from './schema'
 import './app.css'
 
@@ -1894,11 +1902,13 @@ export function App(): React.JSX.Element {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>Alert overlay</h3>
             <p className="muted small">
-              Layout-level setting. The device pops a full-screen modal above
-              the active screen whenever SK publishes a notification with state
-              &gt;= min state. Tapping ACK on the device PUTs{' '}
+              Layout-level setting, per notification state: whether the device
+              pops its full-screen modal, whether it chimes (never, when the
+              notification&apos;s SK <code>method</code> asks for sound, or
+              always) and whether the chime repeats until ACK. Only states that
+              show or chime wake a dimmed panel. Tapping ACK on the device PUTs{' '}
               <code>state: "normal"</code> to the notification path. Defaults:
-              enabled, alarm.
+              enabled, alarm and emergency shown, sound as the source asks.
             </p>
             <label>
               <input
@@ -1906,6 +1916,7 @@ export function App(): React.JSX.Element {
                 checked={notifConfig?.enabled ?? true}
                 onChange={(e) =>
                   setNotifConfig({
+                    ...notifConfig,
                     enabled: e.target.checked,
                     min_state: notifConfig?.min_state ?? 'alarm',
                     ack_method: 'modal'
@@ -1914,26 +1925,79 @@ export function App(): React.JSX.Element {
               />
               enabled
             </label>
-            <label>
-              min state
-              <select
-                value={notifConfig?.min_state ?? 'alarm'}
-                onChange={(e) =>
-                  setNotifConfig({
-                    enabled: notifConfig?.enabled ?? true,
-                    min_state: e.target.value as NonNullable<
-                      Layout['notifications']
-                    >['min_state'],
-                    ack_method: 'modal'
-                  })
-                }
-              >
-                <option value="alert">alert</option>
-                <option value="warn">warn</option>
-                <option value="alarm">alarm</option>
-                <option value="emergency">emergency</option>
-              </select>
-            </label>
+            <table className="levels">
+              <thead>
+                <tr>
+                  <th>state</th>
+                  <th>show</th>
+                  <th>sound</th>
+                  <th>repeat</th>
+                </tr>
+              </thead>
+              <tbody>
+                {NOTIFICATION_STATES.map((s) => {
+                  const l = effectiveLevels(notifConfig)[s]
+                  return (
+                    <tr key={s}>
+                      <td>{s}</td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`show ${s}`}
+                          checked={l.show}
+                          onChange={(e) =>
+                            setNotifConfig(
+                              withLevel(notifConfig, s, {
+                                show: e.target.checked
+                              })
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
+                        <select
+                          aria-label={`sound for ${s}`}
+                          value={l.sound}
+                          onChange={(e) =>
+                            setNotifConfig(
+                              withLevel(notifConfig, s, {
+                                sound: e.target.value as NotificationSound
+                              })
+                            )
+                          }
+                        >
+                          {SOUND_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          aria-label={`repeat for ${s}`}
+                          value={l.repeat_s}
+                          disabled={l.sound === 'off'}
+                          onChange={(e) =>
+                            setNotifConfig(
+                              withLevel(notifConfig, s, {
+                                repeat_s: parseInt(e.target.value, 10)
+                              })
+                            )
+                          }
+                        >
+                          {REPEAT_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
             <label>
               ack method
               <select value="modal" disabled>
