@@ -506,7 +506,9 @@ export function tabStripModes(
   hello: HelloResponse | null | undefined
 ): TabStripMode[] {
   const modes: TabStripMode[] = ['fixed']
-  if (hello?.display?.tab_strip?.includes('overlay-bottom')) {
+  // Checked as an array: a string would match by substring.
+  const listed = hello?.display?.tab_strip
+  if (Array.isArray(listed) && listed.includes('overlay-bottom')) {
     modes.push('overlay-bottom')
   }
   return modes

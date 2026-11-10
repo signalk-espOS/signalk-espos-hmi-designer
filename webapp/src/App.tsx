@@ -138,7 +138,8 @@ function defaultWidget(
   kind: WidgetKind,
   existing: ReadonlyArray<{ id: string }>,
   displayW: number = DEFAULT_DISPLAY_W,
-  displayH: number = DEFAULT_DISPLAY_H
+  displayH: number = DEFAULT_DISPLAY_H,
+  tabStripSpace: number = DEFAULT_TAB_STRIP_HEIGHT
 ): Widget {
   const id = freshId(kind, existing)
   const base = {
@@ -261,7 +262,7 @@ function defaultWidget(
         x: 0,
         y: 0,
         w: displayW,
-        h: displayH - DEFAULT_TAB_STRIP_HEIGHT
+        h: displayH - tabStripSpace
       }
     case 'slider':
       return {
@@ -713,6 +714,7 @@ export function App(): React.JSX.Element {
   const tabOverlay = showTabStrip && tabStrip === 'overlay-bottom'
   const tabStripSpace = showTabStrip && !tabOverlay ? tabStripHeight : 0
   const tabModes = useMemo(() => tabStripModes(hello), [hello])
+  const tabBelowOffset = tabStripHeight + TAB_BELOW_GAP
 
   const grid = useMemo(
     () => screen.widgets.map((w) => widgetToGrid(w, colPxW)),
@@ -929,7 +931,14 @@ export function App(): React.JSX.Element {
     // Pick a fresh id based on the *current* set so we don't collide
     // with anything already in the layout (e.g. loaded from server).
     setScreen((prev) => {
-      const w = defaultWidget(kind, prev.widgets, displayW, displayH)
+      // An overlay strip leaves a stream the panel's full height.
+      const w = defaultWidget(
+        kind,
+        prev.widgets,
+        displayW,
+        displayH,
+        tabStrip === 'overlay-bottom' ? 0 : DEFAULT_TAB_STRIP_HEIGHT
+      )
       setSelectedId(w.id)
       return { ...prev, widgets: [...prev.widgets, w] }
     })
@@ -1441,7 +1450,9 @@ export function App(): React.JSX.Element {
     // omits has to go too, or the previous layout's settings ride along
     // into this one on the next save or push.
     setStatusOverlay(l.status_overlay ?? true)
-    setTabStrip(l.tab_strip ?? 'fixed')
+    // A mode this designer does not know would leave the select, the
+    // canvas and the saved JSON disagreeing.
+    setTabStrip(l.tab_strip === 'overlay-bottom' ? 'overlay-bottom' : 'fixed')
     setNotifConfig(l.notifications)
     setDisplayConfig(l.display)
     setThemeConfig(l.theme)
@@ -1560,8 +1571,10 @@ export function App(): React.JSX.Element {
     }
     // A panel that does not list the mode draws the strip fixed, over
     // the bottom of pages laid out for the full height.
+    // One screen draws no strip, so the mode does not matter there.
     if (
       hello &&
+      showTabStrip &&
       layoutDoc.tab_strip &&
       !tabModes.includes(layoutDoc.tab_strip)
     ) {
@@ -2916,9 +2929,7 @@ export function App(): React.JSX.Element {
               height: `${displayH}px`,
               backgroundSize: `${colPxW}px ${ROW_PX_H}px`,
               // Room for the editable tabs drawn below the canvas.
-              ...(tabOverlay
-                ? { marginBottom: `${tabStripHeight + TAB_BELOW_GAP}px` }
-                : {})
+              ...(tabOverlay ? { marginBottom: `${tabBelowOffset}px` } : {})
             }}
           >
             {statusOverlay && (
@@ -3042,9 +3053,7 @@ export function App(): React.JSX.Element {
                 className={`canvas-tabs${tabOverlay ? ' below' : ''}`}
                 style={{
                   height: `${tabStripHeight}px`,
-                  ...(tabOverlay
-                    ? { bottom: `-${tabStripHeight + TAB_BELOW_GAP}px` }
-                    : {})
+                  ...(tabOverlay ? { bottom: `-${tabBelowOffset}px` } : {})
                 }}
                 onClick={(e) => e.stopPropagation()}
               >

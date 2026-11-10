@@ -293,6 +293,15 @@ describe('tab strip modes', () => {
     ])
   })
 
+  it('ignores a tab_strip that is not a list', () => {
+    const odd = {
+      schema: 1,
+      display: { w: 320, h: 240, tab_strip: 'overlay-bottom' },
+      widgets: {}
+    } as unknown as Parameters<typeof tabStripModes>[0]
+    expect(tabStripModes(odd)).toEqual(['fixed'])
+  })
+
   it('ignores modes this designer does not know', () => {
     expect(tabStripModes(hello(['fixed', 'overlay-left']))).toEqual(['fixed'])
   })
