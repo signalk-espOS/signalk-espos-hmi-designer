@@ -38,16 +38,24 @@ vi.mock('bonjour-service', () => ({ Bonjour: mdns.Bonjour }))
 
 const PREFIX = '/plugins/signalk-hmi-designer'
 
-/** The two ServerAPI members the plugin touches; nothing else is called. */
-function fakeApp(dataDir: string): { app: ServerAPI; status: string[] } {
+/** The ServerAPI members the plugin touches; nothing else is called. */
+function fakeApp(dataDir: string): {
+  app: ServerAPI
+  status: string[]
+  errors: string[]
+} {
   const status: string[] = []
-  const api: Pick<ServerAPI, 'setPluginStatus' | 'getDataDirPath'> = {
+  const errors: string[] = []
+  const api: Pick<ServerAPI, 'setPluginStatus' | 'getDataDirPath' | 'error'> = {
     setPluginStatus: (msg) => {
       status.push(msg)
     },
-    getDataDirPath: () => dataDir
+    getDataDirPath: () => dataDir,
+    error: (msg) => {
+      errors.push(msg)
+    }
   }
-  return { app: api as ServerAPI, status }
+  return { app: api as ServerAPI, status, errors }
 }
 
 function listeningUrl(server: Server): string {
@@ -65,6 +73,7 @@ function closeServer(server: Server): Promise<void> {
 interface Mounted {
   base: string
   status: string[]
+  errors: string[]
   close: () => Promise<void>
 }
 
@@ -74,7 +83,7 @@ interface Mounted {
  * lives under /plugins/<id>.
  */
 async function mount(dataDir: string): Promise<Mounted> {
-  const { app, status } = fakeApp(dataDir)
+  const { app, status, errors } = fakeApp(dataDir)
   const p = plugin(app)
   if (!p.registerWithRouter) throw new Error('plugin has no registerWithRouter')
   const router = express.Router()
@@ -89,6 +98,7 @@ async function mount(dataDir: string): Promise<Mounted> {
   return {
     base: `${listeningUrl(server)}${PREFIX}`,
     status,
+    errors,
     close: () => closeServer(server)
   }
 }
@@ -206,6 +216,18 @@ describe('layout persistence', () => {
     const res = await fetch(`${mounted.base}/layout`)
     expect(res.status).toBe(404)
     expect(await res.json()).toEqual({ error: 'no layout saved yet' })
+  })
+
+  it('logs a read failure and answers without its details', async () => {
+    await fs.mkdir(path.join(dataDir, 'layout.json'))
+    mounted = await mount(dataDir)
+    const res = await fetch(`${mounted.base}/layout`)
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({
+      error: 'could not read the saved layout'
+    })
+    expect(mounted.errors).toHaveLength(1)
+    expect(mounted.errors[0]).toContain('EISDIR')
   })
 
   it('rejects a PUT without a JSON object body', async () => {
@@ -514,5 +536,36 @@ describe('GET /devices', () => {
     await vi.advanceTimersByTimeAsync(1)
     expect(browser.stop).toHaveBeenCalledTimes(1)
     expect(destroy).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('route access', () => {
+  it('opens the read routes to read-only users and keeps the writes admin-only', () => {
+    const scoped: string[] = []
+    const direct: string[] = []
+    const record = (into: string[], method: string) => (route: string) => {
+      into.push(`${method} ${route}`)
+    }
+    const router = {
+      get: record(direct, 'GET'),
+      put: record(direct, 'PUT'),
+      post: record(direct, 'POST'),
+      access: (level: string) => {
+        expect(level).toBe('readonly')
+        return {
+          get: record(scoped, 'GET'),
+          put: record(scoped, 'PUT'),
+          post: record(scoped, 'POST')
+        }
+      }
+    }
+    const p = plugin(fakeApp(tmpdir()).app)
+    p.registerWithRouter?.(router as unknown as PluginRouter)
+    expect(scoped.sort()).toEqual([
+      'GET /devices',
+      'GET /layout',
+      'GET /status'
+    ])
+    expect(direct.sort()).toEqual(['POST /device-proxy', 'PUT /layout'])
   })
 })
