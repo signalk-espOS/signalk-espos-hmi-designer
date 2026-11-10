@@ -121,7 +121,10 @@ const plugin = (app: ServerAPI): Plugin => {
             res.status(404).json({ error: 'no layout saved yet' })
             return
           }
-          res.status(500).json({ error: e.message })
+          // The file system's message names server paths, and anyone who
+          // can read the layout sees this answer.
+          app.error(`could not read ${LAYOUT_FILE}: ${e.message}`)
+          res.status(500).json({ error: 'could not read the saved layout' })
         }
       })
 
