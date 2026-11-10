@@ -294,12 +294,16 @@ interface GridSpec {
 }
 
 function widgetToGrid(w: Widget, colPxW: number, rowPxH: number): GridSpec {
+  // Round the edges, not the sizes, so two widgets that touch in pixels
+  // still share a grid line and do not overlap after a drag.
+  const x = Math.round(w.x / colPxW)
+  const y = Math.round(w.y / rowPxH)
   return {
     i: w.id,
-    x: Math.round(w.x / colPxW),
-    y: Math.round(w.y / rowPxH),
-    w: Math.max(1, Math.round(w.w / colPxW)),
-    h: Math.max(1, Math.round(w.h / rowPxH))
+    x,
+    y,
+    w: Math.max(1, Math.round((w.x + w.w) / colPxW) - x),
+    h: Math.max(1, Math.round((w.y + w.h) / rowPxH) - y)
   }
 }
 
