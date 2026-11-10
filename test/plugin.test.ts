@@ -516,3 +516,34 @@ describe('GET /devices', () => {
     expect(destroy).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('route access', () => {
+  it('opens the read routes to read-only users and keeps the writes admin-only', () => {
+    const scoped: string[] = []
+    const direct: string[] = []
+    const record = (into: string[], method: string) => (route: string) => {
+      into.push(`${method} ${route}`)
+    }
+    const router = {
+      get: record(direct, 'GET'),
+      put: record(direct, 'PUT'),
+      post: record(direct, 'POST'),
+      access: (level: string) => {
+        expect(level).toBe('readonly')
+        return {
+          get: record(scoped, 'GET'),
+          put: record(scoped, 'PUT'),
+          post: record(scoped, 'POST')
+        }
+      }
+    }
+    const p = plugin(fakeApp(tmpdir()).app)
+    p.registerWithRouter?.(router as unknown as PluginRouter)
+    expect(scoped.sort()).toEqual([
+      'GET /devices',
+      'GET /layout',
+      'GET /status'
+    ])
+    expect(direct.sort()).toEqual(['POST /device-proxy', 'PUT /layout'])
+  })
+})
