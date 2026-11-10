@@ -869,9 +869,12 @@ export function App(): React.JSX.Element {
     setSelectedId(null)
   }
 
-  const removeScreen = (idx: number): void => {
+  // By id: a confirmed delete runs after later renders may have
+  // reordered the tabs, so the index is resolved from current state.
+  const removeScreen = (id: string): void => {
     setScreens((prev) => {
-      if (prev.length <= 1) return prev // keep at least one
+      const idx = prev.findIndex((x) => x.id === id)
+      if (idx < 0 || prev.length <= 1) return prev // keep at least one
       const next = prev.filter((_, i) => i !== idx)
       // Keep active in range; prefer the screen to the left.
       setActiveIdx((cur) => {
@@ -954,9 +957,6 @@ export function App(): React.JSX.Element {
   // adoptLayout for ordering reasons) can route through the same
   // migration + state-hydration path as Load / Import.
   const adoptLayoutRef = useRef<((l: Layout) => void) | null>(null)
-  // A confirmation runs after later renders; it must see their screens.
-  const screensRef = useRef(screens)
-  screensRef.current = screens
 
   const copySelected = (): void => {
     const w = screen.widgets.find((x) => x.id === selectedId)
@@ -3109,12 +3109,7 @@ export function App(): React.JSX.Element {
                           setPendingConfirm({
                             message: `Delete screen "${s.title}"?`,
                             action: 'delete',
-                            run: () => {
-                              const idx = screensRef.current.findIndex(
-                                (x) => x.id === s.id
-                              )
-                              if (idx >= 0) removeScreen(idx)
-                            }
+                            run: () => removeScreen(s.id)
                           })
                         }
                       />
