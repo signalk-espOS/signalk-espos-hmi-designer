@@ -73,7 +73,7 @@ declare const __PLUGIN_VERSION__: string
 // react-grid-layout uses unitless column/row coordinates. We translate
 // to device pixels on export. Column width is derived per-render from
 // the target display's `display.w` reported in /hello; rows are a
-// fixed pixel height for stability across different aspect ratios.
+// fixed pixel height, 25 px, or 4 px on a small panel (SMALL_PANEL_H).
 const COLS = 24
 const ROW_HEIGHT = 25
 // A panel lower than this snaps to 4 px rows: 25 px rows leave up to
@@ -315,10 +315,12 @@ function applyGrid(
 ): Widget {
   return {
     ...w,
+    // Edges again, so neighbours on fractional columns neither gap
+    // nor overlap by a pixel.
     x: Math.round(g.x * colPxW),
     y: Math.round(g.y * rowPxH),
-    w: Math.round(g.w * colPxW),
-    h: Math.round(g.h * rowPxH)
+    w: Math.round((g.x + g.w) * colPxW) - Math.round(g.x * colPxW),
+    h: Math.round((g.y + g.h) * rowPxH) - Math.round(g.y * rowPxH)
   }
 }
 
@@ -713,9 +715,9 @@ export function App(): React.JSX.Element {
   const displayW = hello?.display?.w ?? DEFAULT_DISPLAY_W
   const displayH = hello?.display?.h ?? DEFAULT_DISPLAY_H
   const colPxW = displayW / COLS
-  const rowPxH = displayH < SMALL_PANEL_H ? SMALL_ROW_HEIGHT : ROW_HEIGHT
-  const gridLinePxH =
-    rowPxH === SMALL_ROW_HEIGHT ? rowPxH * SMALL_ROW_LINES : rowPxH
+  const smallPanel = displayH < SMALL_PANEL_H
+  const rowPxH = smallPanel ? SMALL_ROW_HEIGHT : ROW_HEIGHT
+  const gridLinePxH = smallPanel ? rowPxH * SMALL_ROW_LINES : rowPxH
   // Tab strip is rendered only when there's more than one screen, to
   // match the firmware (which hides the strip in that case).
   const tabStripHeight = DEFAULT_TAB_STRIP_HEIGHT
@@ -2896,7 +2898,9 @@ export function App(): React.JSX.Element {
             style={{
               width: `${displayW}px`,
               height: `${displayH}px`,
-              backgroundSize: `${colPxW}px ${gridLinePxH}px`
+              backgroundSize: `${colPxW}px ${gridLinePxH}px`,
+              // Rows start below the status strip; so must the lines.
+              backgroundPosition: `0 ${statusOverlay ? STATUS_OVERLAY_HEIGHT : 0}px`
             }}
           >
             {statusOverlay && (
