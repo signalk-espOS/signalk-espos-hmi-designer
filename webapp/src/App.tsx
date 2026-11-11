@@ -292,6 +292,24 @@ interface GridSpec {
   h: number
 }
 
+// A stream sized for a single screen fills the page, so the fixed strip
+// that a second screen brings would crop its bottom on the panel.
+function fitStreams(screens: Screen[], pageH: number): Screen[] {
+  return screens.map((s) => {
+    if (!s.widgets.some((w) => w.type === 'stream' && w.y + w.h > pageH)) {
+      return s
+    }
+    return {
+      ...s,
+      widgets: s.widgets.map((w) =>
+        w.type === 'stream' && w.y + w.h > pageH
+          ? { ...w, h: Math.max(1, pageH - w.y) }
+          : w
+      )
+    }
+  })
+}
+
 function widgetToGrid(w: Widget, colPxW: number): GridSpec {
   return {
     i: w.id,
@@ -730,6 +748,8 @@ export function App(): React.JSX.Element {
   const tabStripSpace = showTabStrip && !tabOverlay ? tabStripHeight : 0
   const tabModes = useMemo(() => tabStripModes(hello), [hello])
   const tabBelowOffset = tabStripHeight + TAB_BELOW_GAP
+  const fixedStripPageH =
+    displayH - (statusOverlay ? STATUS_OVERLAY_HEIGHT : 0) - tabStripHeight
 
   const grid = useMemo(
     () => screen.widgets.map((w) => widgetToGrid(w, colPxW)),
@@ -875,7 +895,11 @@ export function App(): React.JSX.Element {
         n++
         id = `screen${n}`
       }
-      const next = [...prev, { id, title: `Tab ${n}`, widgets: [] }]
+      const added = [...prev, { id, title: `Tab ${n}`, widgets: [] }]
+      const next =
+        prev.length === 1 && tabStrip !== 'overlay-bottom'
+          ? fitStreams(added, fixedStripPageH)
+          : added
       setActiveIdx(next.length - 1)
       return next
     })
@@ -1785,7 +1809,13 @@ export function App(): React.JSX.Element {
               tabs
               <select
                 value={tabStrip}
-                onChange={(e) => setTabStrip(e.target.value as TabStripMode)}
+                onChange={(e) => {
+                  const mode = e.target.value as TabStripMode
+                  setTabStrip(mode)
+                  if (mode === 'fixed' && showTabStrip) {
+                    setScreens((prev) => fitStreams(prev, fixedStripPageH))
+                  }
+                }}
               >
                 <option value="fixed">fixed</option>
                 <option value="overlay-bottom">overlay</option>
