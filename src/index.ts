@@ -1,5 +1,5 @@
-import type { Plugin, ServerAPI } from '@signalk/server-api'
-import type { Request, Response, IRouter } from 'express'
+import type { Plugin, PluginRouter, ServerAPI } from '@signalk/server-api'
+import type { Request, Response } from 'express'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { Bonjour } from 'bonjour-service'
@@ -63,13 +63,18 @@ const plugin = (app: ServerAPI): Plugin => {
       app.setPluginStatus('Stopped')
     },
 
-    registerWithRouter(router: IRouter) {
+    registerWithRouter(router: PluginRouter) {
+      // Anyone allowed to read the server may browse for panels and open
+      // the saved layout; saving it and talking to a panel stay admin-only.
+      // Servers before 2.34 have no access() and gate no plugin route.
+      const readable =
+        typeof router.access === 'function' ? router.access('readonly') : router
       // Browse the LAN for cockpit panels so the webapp does not have to
       // guess a hostname. Devices advertise `_signalk-player._tcp`;
       // espOS names them per-MAC (espos-<mac4>), so no hardcoded default
       // can be right and a typed URL goes stale the moment a panel is
       // reflashed or replaced.
-      router.get('/devices', (_req: Request, res: Response) => {
+      readable.get('/devices', (_req: Request, res: Response) => {
         const bonjour = new Bonjour()
         const found = new Map<string, DiscoveredDevice>()
         const browser = bonjour.find({
@@ -98,14 +103,14 @@ const plugin = (app: ServerAPI): Plugin => {
         }, 1500)
       })
 
-      router.get('/status', (_req: Request, res: Response) => {
+      readable.get('/status', (_req: Request, res: Response) => {
         res.json({ ok: true, plugin: PLUGIN_ID })
       })
 
       // Layout persistence — stored in the plugin's private data dir
       // so the webapp can reload its last-pushed layout after a
       // browser refresh.
-      router.get('/layout', async (_req: Request, res: Response) => {
+      readable.get('/layout', async (_req: Request, res: Response) => {
         try {
           const file = path.join(app.getDataDirPath(), LAYOUT_FILE)
           const data = await fs.readFile(file, 'utf-8')
@@ -116,7 +121,10 @@ const plugin = (app: ServerAPI): Plugin => {
             res.status(404).json({ error: 'no layout saved yet' })
             return
           }
-          res.status(500).json({ error: e.message })
+          // The file system's message names server paths, and anyone who
+          // can read the layout sees this answer.
+          app.error(`could not read ${LAYOUT_FILE}: ${e.message}`)
+          res.status(500).json({ error: 'could not read the saved layout' })
         }
       })
 

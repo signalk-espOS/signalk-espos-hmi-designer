@@ -314,12 +314,31 @@ export type NotificationState = 'alert' | 'warn' | 'alarm' | 'emergency'
  *  artifact (modal that pops above the active screen when SK
  *  delivers a qualifying notification); the designer doesn't
  *  preview it on the canvas. */
+/** When a level chimes: never, when the notification's SK `method`
+ *  asks for "sound", or always. */
+export type NotificationSound = 'off' | 'source' | 'always'
+
+/** One state's alert settings. A field left out keeps what min_state
+ *  implies (shown and sounding as the source asks from min_state up). */
+export interface NotificationLevel {
+  /** The modal pops for this state. */
+  show?: boolean
+  sound?: NotificationSound
+  /** Chime again every so many seconds until acknowledged; 0 = once. */
+  repeat_s?: number
+}
+
 export interface NotificationsConfig {
   enabled: boolean
-  /** Only notifications with state >= min_state trigger the modal. */
+  /** Only notifications with state >= min_state trigger the modal.
+   *  With `levels`, the lowest shown state, for firmware that predates
+   *  `levels`. */
   min_state: NotificationState
   /** v1: always "modal" (locked in the designer). */
   ack_method?: 'modal'
+  /** Per-state show / sound / repeat. Optional and additive: firmware
+   *  without it applies min_state. */
+  levels?: Partial<Record<NotificationState, NotificationLevel>>
 }
 
 export interface Layout {

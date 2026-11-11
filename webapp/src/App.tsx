@@ -24,6 +24,13 @@ import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 
 import { WasmCanvas } from './WasmCanvas'
+import {
+  NOTIFICATION_STATES,
+  REPEAT_OPTIONS,
+  SOUND_OPTIONS,
+  effectiveLevels,
+  withLevel
+} from './notificationLevels'
 import { useNotifications, useSkValues } from './skStream'
 import {
   DEFAULT_TAB_STRIP_HEIGHT,
@@ -64,7 +71,8 @@ import type {
   Screen,
   Widget,
   WidgetKind,
-  HelloResponse
+  HelloResponse,
+  NotificationSound
 } from './schema'
 import './app.css'
 
@@ -78,10 +86,17 @@ const TAB_BELOW_GAP = 8
 // react-grid-layout uses unitless column/row coordinates. We translate
 // to device pixels on export. Column width is derived per-render from
 // the target display's `display.w` reported in /hello; rows are a
-// fixed pixel height for stability across different aspect ratios.
+// fixed pixel height, 25 px, or 4 px on a small panel (SMALL_PANEL_H).
 const COLS = 24
 const ROW_HEIGHT = 25
-const ROW_PX_H = ROW_HEIGHT
+// A panel lower than this snaps to 4 px rows: 25 px rows leave up to
+// 24 px at the bottom of a 240 px panel unreachable, while 4 divides
+// every height a 240 px panel offers (240, 212, 184, 156).
+const SMALL_PANEL_H = 400
+const SMALL_ROW_HEIGHT = 4
+// Grid lines on a small panel every 5 rows, so 4 px snapping does not
+// fill the canvas with lines.
+const SMALL_ROW_LINES = 5
 
 // react-grid-layout 2 takes its settings as config objects instead of
 // flat props. The ones that never change live here so their identity is
@@ -310,23 +325,34 @@ function fitStreams(screens: Screen[], pageH: number): Screen[] {
   })
 }
 
-function widgetToGrid(w: Widget, colPxW: number): GridSpec {
+function widgetToGrid(w: Widget, colPxW: number, rowPxH: number): GridSpec {
+  // Round the edges, not the sizes, so two widgets that touch in pixels
+  // still share a grid line and do not overlap after a drag.
+  const x = Math.round(w.x / colPxW)
+  const y = Math.round(w.y / rowPxH)
   return {
     i: w.id,
-    x: Math.round(w.x / colPxW),
-    y: Math.round(w.y / ROW_PX_H),
-    w: Math.max(1, Math.round(w.w / colPxW)),
-    h: Math.max(1, Math.round(w.h / ROW_PX_H))
+    x,
+    y,
+    w: Math.max(1, Math.round((w.x + w.w) / colPxW) - x),
+    h: Math.max(1, Math.round((w.y + w.h) / rowPxH) - y)
   }
 }
 
-function applyGrid(w: Widget, g: GLLayout, colPxW: number): Widget {
+function applyGrid(
+  w: Widget,
+  g: GLLayout,
+  colPxW: number,
+  rowPxH: number
+): Widget {
   return {
     ...w,
+    // Edges again, so neighbours on fractional columns neither gap
+    // nor overlap by a pixel.
     x: Math.round(g.x * colPxW),
-    y: Math.round(g.y * ROW_PX_H),
-    w: Math.round(g.w * colPxW),
-    h: Math.round(g.h * ROW_PX_H)
+    y: Math.round(g.y * rowPxH),
+    w: Math.round((g.x + g.w) * colPxW) - Math.round(g.x * colPxW),
+    h: Math.round((g.y + g.h) * rowPxH) - Math.round(g.y * rowPxH)
   }
 }
 
@@ -504,6 +530,12 @@ export function App(): React.JSX.Element {
     Layout['notifications'] | undefined
   >(undefined)
   const [showNotifModal, setShowNotifModal] = useState<boolean>(false)
+  // Asked in the page: kiosk browsers on a plotter may block window.confirm().
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    message: string
+    action: string
+    run: () => void
+  } | null>(null)
   const [displayConfig, setDisplayConfig] = useState<
     Layout['display'] | undefined
   >(undefined)
@@ -738,6 +770,9 @@ export function App(): React.JSX.Element {
   const displayW = hello?.display?.w ?? DEFAULT_DISPLAY_W
   const displayH = hello?.display?.h ?? DEFAULT_DISPLAY_H
   const colPxW = displayW / COLS
+  const smallPanel = displayH < SMALL_PANEL_H
+  const rowPxH = smallPanel ? SMALL_ROW_HEIGHT : ROW_HEIGHT
+  const gridLinePxH = smallPanel ? rowPxH * SMALL_ROW_LINES : rowPxH
   // Tab strip is rendered only when there's more than one screen, to
   // match the firmware (which hides the strip in that case).
   const tabStripHeight = tabStripHeightCfg ?? DEFAULT_TAB_STRIP_HEIGHT
@@ -752,8 +787,8 @@ export function App(): React.JSX.Element {
     displayH - (statusOverlay ? STATUS_OVERLAY_HEIGHT : 0) - tabStripHeight
 
   const grid = useMemo(
-    () => screen.widgets.map((w) => widgetToGrid(w, colPxW)),
-    [screen.widgets, colPxW]
+    () => screen.widgets.map((w) => widgetToGrid(w, colPxW, rowPxH)),
+    [screen.widgets, colPxW, rowPxH]
   )
 
   // Rows that fit the canvas: the display minus the status overlay strip
@@ -763,7 +798,7 @@ export function App(): React.JSX.Element {
   // row, which leaves no drop zone below.
   const maxRows = Math.floor(
     (displayH - (statusOverlay ? STATUS_OVERLAY_HEIGHT : 0) - tabStripSpace) /
-      ROW_HEIGHT
+      rowPxH
   )
   // RGL defaults margin and containerPadding to [10,10], which shifts
   // everything by 10-20px per widget, and the canvas no longer reflects
@@ -773,12 +808,12 @@ export function App(): React.JSX.Element {
   const gridConfig = useMemo(
     () => ({
       cols: COLS,
-      rowHeight: ROW_HEIGHT,
+      rowHeight: rowPxH,
       margin: [0, 0] as const,
       containerPadding: [0, 0] as const,
       maxRows
     }),
-    [maxRows]
+    [maxRows, rowPxH]
   )
 
   // Effective layout for the WASM canvas: layoutDoc with the
@@ -788,14 +823,16 @@ export function App(): React.JSX.Element {
   const wasmLayoutDoc = useMemo<Layout>(() => {
     if (!dragPreview) return layoutDoc
     const apply = (w: Widget): Widget =>
-      w.id === dragPreview.id ? applyGrid(w, dragPreview.grid, colPxW) : w
+      w.id === dragPreview.id
+        ? applyGrid(w, dragPreview.grid, colPxW, rowPxH)
+        : w
     return {
       ...layoutDoc,
       screens: layoutDoc.screens.map((s, i) =>
         i === activeIdx ? { ...s, widgets: s.widgets.map(apply) } : s
       )
     }
-  }, [layoutDoc, dragPreview, activeIdx, colPxW])
+  }, [layoutDoc, dragPreview, activeIdx, colPxW, rowPxH])
 
   // Live SK values for any bound widget. The hook re-subscribes when
   // the set of bound paths changes. Includes top-level widget binds
@@ -861,7 +898,7 @@ export function App(): React.JSX.Element {
     setScreen((prev) => ({
       ...prev,
       widgets: prev.widgets.map((w) =>
-        w.id === newItem.i ? applyGrid(w, newItem, colPxW) : w
+        w.id === newItem.i ? applyGrid(w, newItem, colPxW, rowPxH) : w
       )
     }))
   }
@@ -906,9 +943,12 @@ export function App(): React.JSX.Element {
     setSelectedId(null)
   }
 
-  const removeScreen = (idx: number): void => {
+  // By id: a confirmed delete runs after later renders may have
+  // reordered the tabs, so the index is resolved from current state.
+  const removeScreen = (id: string): void => {
     setScreens((prev) => {
-      if (prev.length <= 1) return prev // keep at least one
+      const idx = prev.findIndex((x) => x.id === id)
+      if (idx < 0 || prev.length <= 1) return prev // keep at least one
       const next = prev.filter((_, i) => i !== idx)
       // Keep active in range; prefer the screen to the left.
       setActiveIdx((cur) => {
@@ -1033,6 +1073,9 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (!(e.ctrlKey || e.metaKey)) return
+      // A paste behind an open confirmation would change the layout the
+      // user is about to confirm clearing or replacing.
+      if (document.querySelector('dialog[open]')) return
       const t = e.target as HTMLElement | null
       const tag = t?.tagName
       const isEditable =
@@ -1530,19 +1573,23 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const onLoad = async (): Promise<void> => {
+  const onLoad = (): void => {
     setFileMsg(null)
-    if (
-      !confirm('Load saved layout from SK server? Unsaved edits will be lost.')
-    )
-      return
+    setPendingConfirm({
+      message: 'Load saved layout from SK server? Unsaved edits will be lost.',
+      action: 'load',
+      run: () => void loadFromServer()
+    })
+  }
+
+  const loadFromServer = async (): Promise<void> => {
     try {
       const saved = await loadSavedLayout()
       if (!saved) {
         setFileMsg('no saved layout on server')
         return
       }
-      adoptLayout(saved)
+      adoptLayoutRef.current?.(saved)
       setFileMsg('loaded from SK server')
     } catch (e) {
       setFileMsg(`load failed: ${e instanceof Error ? e.message : String(e)}`)
@@ -1581,12 +1628,16 @@ export function App(): React.JSX.Element {
   }
 
   const onClear = (): void => {
-    if (!confirm('Clear the canvas? All screens and widgets will be removed.'))
-      return
-    setScreens([{ id: 'main', title: 'Main', widgets: [] }])
-    setActiveIdx(0)
-    setSelectedId(null)
-    setFileMsg('cleared')
+    setPendingConfirm({
+      message: 'Clear the canvas? All screens and widgets will be removed.',
+      action: 'clear',
+      run: () => {
+        setScreens([{ id: 'main', title: 'Main', widgets: [] }])
+        setActiveIdx(0)
+        setSelectedId(null)
+        setFileMsg('cleared')
+      }
+    })
   }
 
   const onPush = async (): Promise<void> => {
@@ -1941,7 +1992,7 @@ export function App(): React.JSX.Element {
           <button onClick={() => void onSave()} title="Save to SK server">
             Save
           </button>
-          <button onClick={() => void onLoad()} title="Load from SK server">
+          <button onClick={onLoad} title="Load from SK server">
             Load
           </button>
           <button onClick={onExport} title="Download JSON file">
@@ -1995,6 +2046,18 @@ export function App(): React.JSX.Element {
         </div>
       </header>
 
+      {pendingConfirm && (
+        <ConfirmDialog
+          message={pendingConfirm.message}
+          action={pendingConfirm.action}
+          onCancel={() => setPendingConfirm(null)}
+          onConfirm={() => {
+            setPendingConfirm(null)
+            pendingConfirm.run()
+          }}
+        />
+      )}
+
       {showNotifModal && (
         <div
           className="modal-backdrop"
@@ -2003,11 +2066,13 @@ export function App(): React.JSX.Element {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>Alert overlay</h3>
             <p className="muted small">
-              Layout-level setting. The device pops a full-screen modal above
-              the active screen whenever SK publishes a notification with state
-              &gt;= min state. Tapping ACK on the device PUTs{' '}
+              Layout-level setting, per notification state: whether the device
+              pops its full-screen modal, whether it chimes (never, when the
+              notification&apos;s SK <code>method</code> asks for sound, or
+              always) and whether the chime repeats until ACK. Only states that
+              show or chime wake a dimmed panel. Tapping ACK on the device PUTs{' '}
               <code>state: "normal"</code> to the notification path. Defaults:
-              enabled, alarm.
+              enabled, alarm and emergency shown, sound as the source asks.
             </p>
             <label>
               <input
@@ -2015,6 +2080,7 @@ export function App(): React.JSX.Element {
                 checked={notifConfig?.enabled ?? true}
                 onChange={(e) =>
                   setNotifConfig({
+                    ...notifConfig,
                     enabled: e.target.checked,
                     min_state: notifConfig?.min_state ?? 'alarm',
                     ack_method: 'modal'
@@ -2023,26 +2089,79 @@ export function App(): React.JSX.Element {
               />
               enabled
             </label>
-            <label>
-              min state
-              <select
-                value={notifConfig?.min_state ?? 'alarm'}
-                onChange={(e) =>
-                  setNotifConfig({
-                    enabled: notifConfig?.enabled ?? true,
-                    min_state: e.target.value as NonNullable<
-                      Layout['notifications']
-                    >['min_state'],
-                    ack_method: 'modal'
-                  })
-                }
-              >
-                <option value="alert">alert</option>
-                <option value="warn">warn</option>
-                <option value="alarm">alarm</option>
-                <option value="emergency">emergency</option>
-              </select>
-            </label>
+            <table className="levels">
+              <thead>
+                <tr>
+                  <th>state</th>
+                  <th>show</th>
+                  <th>sound</th>
+                  <th>repeat</th>
+                </tr>
+              </thead>
+              <tbody>
+                {NOTIFICATION_STATES.map((s) => {
+                  const l = effectiveLevels(notifConfig)[s]
+                  return (
+                    <tr key={s}>
+                      <td>{s}</td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`show ${s}`}
+                          checked={l.show}
+                          onChange={(e) =>
+                            setNotifConfig(
+                              withLevel(notifConfig, s, {
+                                show: e.target.checked
+                              })
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
+                        <select
+                          aria-label={`sound for ${s}`}
+                          value={l.sound}
+                          onChange={(e) =>
+                            setNotifConfig(
+                              withLevel(notifConfig, s, {
+                                sound: e.target.value as NotificationSound
+                              })
+                            )
+                          }
+                        >
+                          {SOUND_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          aria-label={`repeat for ${s}`}
+                          value={l.repeat_s}
+                          disabled={l.sound === 'off'}
+                          onChange={(e) =>
+                            setNotifConfig(
+                              withLevel(notifConfig, s, {
+                                repeat_s: parseInt(e.target.value, 10)
+                              })
+                            )
+                          }
+                        >
+                          {REPEAT_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
             <label>
               ack method
               <select value="modal" disabled>
@@ -2984,7 +3103,9 @@ export function App(): React.JSX.Element {
             style={{
               width: `${displayW}px`,
               height: `${displayH}px`,
-              backgroundSize: `${colPxW}px ${ROW_PX_H}px`,
+              backgroundSize: `${colPxW}px ${gridLinePxH}px`,
+              // Rows start below the status strip; so must the lines.
+              backgroundPosition: `0 ${statusOverlay ? STATUS_OVERLAY_HEIGHT : 0}px`,
               // Room for the editable tabs drawn below the canvas.
               ...(tabOverlay ? { marginBottom: `${tabBelowOffset}px` } : {})
             }}
@@ -3134,10 +3255,13 @@ export function App(): React.JSX.Element {
                           setActiveIdx(i)
                           setSelectedId(null)
                         }}
-                        onClose={() => {
-                          if (confirm(`Delete screen "${s.title}"?`))
-                            removeScreen(i)
-                        }}
+                        onClose={() =>
+                          setPendingConfirm({
+                            message: `Delete screen "${s.title}"?`,
+                            action: 'delete',
+                            run: () => removeScreen(s.id)
+                          })
+                        }
                       />
                     ))}
                   </SortableContext>
@@ -3198,5 +3322,57 @@ export function App(): React.JSX.Element {
         </aside>
       </div>
     </div>
+  )
+}
+
+/**
+ * A native modal <dialog>: the browser moves focus in, keeps it there, makes
+ * the page behind inert and turns Escape into a cancel.
+ */
+function ConfirmDialog({
+  message,
+  action,
+  onCancel,
+  onConfirm
+}: {
+  message: string
+  action: string
+  onCancel: () => void
+  onConfirm: () => void
+}): React.JSX.Element {
+  const ref = useRef<HTMLDialogElement | null>(null)
+  useEffect(() => {
+    const dialog = ref.current
+    if (dialog && !dialog.open) dialog.showModal()
+    return () => dialog?.close()
+  }, [])
+  return (
+    <dialog
+      ref={ref}
+      className="modal"
+      aria-labelledby="confirm-message"
+      onCancel={(e) => {
+        e.preventDefault()
+        onCancel()
+      }}
+      onClick={(e) => {
+        // A click on the backdrop lands on the dialog itself, outside its box.
+        const box = e.currentTarget.getBoundingClientRect()
+        const outside =
+          e.clientX < box.left ||
+          e.clientX > box.right ||
+          e.clientY < box.top ||
+          e.clientY > box.bottom
+        if (e.target === e.currentTarget && outside) onCancel()
+      }}
+    >
+      <p id="confirm-message">{message}</p>
+      <div className="modal-actions">
+        <button className="ghost" autoFocus onClick={onCancel}>
+          cancel
+        </button>
+        <button onClick={onConfirm}>{action}</button>
+      </div>
+    </dialog>
   )
 }
