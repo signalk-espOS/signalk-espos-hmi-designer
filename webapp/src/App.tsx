@@ -947,14 +947,13 @@ export function App(): React.JSX.Element {
     // with anything already in the layout (e.g. loaded from server).
     setScreen((prev) => {
       // A new stream fills the page: below the status bar, and above
-      // the tab strip unless that is an overlay.
+      // the tab strip when one takes room on the page.
       const w = defaultWidget(
         kind,
         prev.widgets,
         displayW,
         displayH,
-        (statusOverlay ? STATUS_OVERLAY_HEIGHT : 0) +
-          (tabStrip === 'overlay-bottom' ? 0 : tabStripHeight)
+        (statusOverlay ? STATUS_OVERLAY_HEIGHT : 0) + tabStripSpace
       )
       setSelectedId(w.id)
       return { ...prev, widgets: [...prev.widgets, w] }
