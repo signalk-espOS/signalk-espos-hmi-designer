@@ -991,6 +991,9 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (!(e.ctrlKey || e.metaKey)) return
+      // A paste behind an open confirmation would change the layout the
+      // user is about to confirm clearing or replacing.
+      if (document.querySelector('dialog[open]')) return
       const t = e.target as HTMLElement | null
       const tag = t?.tagName
       const isEditable =
