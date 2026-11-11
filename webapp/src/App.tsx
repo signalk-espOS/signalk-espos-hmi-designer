@@ -139,7 +139,7 @@ function defaultWidget(
   existing: ReadonlyArray<{ id: string }>,
   displayW: number = DEFAULT_DISPLAY_W,
   displayH: number = DEFAULT_DISPLAY_H,
-  tabStripSpace: number = DEFAULT_TAB_STRIP_HEIGHT
+  reservedH: number = DEFAULT_TAB_STRIP_HEIGHT
 ): Widget {
   const id = freshId(kind, existing)
   const base = {
@@ -262,7 +262,7 @@ function defaultWidget(
         x: 0,
         y: 0,
         w: displayW,
-        h: displayH - tabStripSpace
+        h: displayH - reservedH
       }
     case 'slider':
       return {
@@ -478,6 +478,10 @@ export function App(): React.JSX.Element {
   const [activeIdx, setActiveIdx] = useState<number>(0)
   const [statusOverlay, setStatusOverlay] = useState<boolean>(true)
   const [tabStrip, setTabStrip] = useState<TabStripMode>('fixed')
+  // Kept from a loaded layout so a save does not drop it.
+  const [tabStripHeightCfg, setTabStripHeightCfg] = useState<
+    number | undefined
+  >(undefined)
   const [notifConfig, setNotifConfig] = useState<
     Layout['notifications'] | undefined
   >(undefined)
@@ -691,12 +695,23 @@ export function App(): React.JSX.Element {
       name: 'Designer',
       status_overlay: statusOverlay,
       ...(tabStrip !== 'fixed' ? { tab_strip: tabStrip } : {}),
+      ...(tabStripHeightCfg !== undefined
+        ? { tab_strip_height: tabStripHeightCfg }
+        : {}),
       ...(notifConfig ? { notifications: notifConfig } : {}),
       ...(displayConfig ? { display: displayConfig } : {}),
       ...(themeConfig ? { theme: themeConfig } : {}),
       screens
     }),
-    [screens, statusOverlay, tabStrip, notifConfig, displayConfig, themeConfig]
+    [
+      screens,
+      statusOverlay,
+      tabStrip,
+      tabStripHeightCfg,
+      notifConfig,
+      displayConfig,
+      themeConfig
+    ]
   )
 
   // Canvas dimensions track the connected device's /hello.display
@@ -707,7 +722,7 @@ export function App(): React.JSX.Element {
   const colPxW = displayW / COLS
   // Tab strip is rendered only when there's more than one screen, to
   // match the firmware (which hides the strip in that case).
-  const tabStripHeight = DEFAULT_TAB_STRIP_HEIGHT
+  const tabStripHeight = tabStripHeightCfg ?? DEFAULT_TAB_STRIP_HEIGHT
   const showTabStrip = screens.length > 1
   // An overlay strip leaves the pages the full height on the device.
   // The canvas marks where it shows and puts the editable tabs below.
@@ -931,13 +946,15 @@ export function App(): React.JSX.Element {
     // Pick a fresh id based on the *current* set so we don't collide
     // with anything already in the layout (e.g. loaded from server).
     setScreen((prev) => {
-      // An overlay strip leaves a stream the panel's full height.
+      // A new stream fills the page: below the status bar, and above
+      // the tab strip unless that is an overlay.
       const w = defaultWidget(
         kind,
         prev.widgets,
         displayW,
         displayH,
-        tabStrip === 'overlay-bottom' ? 0 : DEFAULT_TAB_STRIP_HEIGHT
+        (statusOverlay ? STATUS_OVERLAY_HEIGHT : 0) +
+          (tabStrip === 'overlay-bottom' ? 0 : tabStripHeight)
       )
       setSelectedId(w.id)
       return { ...prev, widgets: [...prev.widgets, w] }
@@ -1450,6 +1467,11 @@ export function App(): React.JSX.Element {
     // omits has to go too, or the previous layout's settings ride along
     // into this one on the next save or push.
     setStatusOverlay(l.status_overlay ?? true)
+    setTabStripHeightCfg(
+      typeof l.tab_strip_height === 'number' && l.tab_strip_height > 0
+        ? l.tab_strip_height
+        : undefined
+    )
     // A mode this designer does not know would leave the select, the
     // canvas and the saved JSON disagreeing.
     setTabStrip(l.tab_strip === 'overlay-bottom' ? 'overlay-bottom' : 'fixed')
@@ -1572,15 +1594,21 @@ export function App(): React.JSX.Element {
     // A panel that does not list the mode draws the strip fixed, over
     // the bottom of pages laid out for the full height.
     // One screen draws no strip, so the mode does not matter there.
+    // The modes must come from the panel being pushed to, not from an
+    // earlier connection or none.
     if (
-      hello &&
       showTabStrip &&
       layoutDoc.tab_strip &&
-      !tabModes.includes(layoutDoc.tab_strip)
+      (!hello ||
+        connectedUrl !== deviceUrl ||
+        !tabModes.includes(layoutDoc.tab_strip))
     ) {
       setPushErr(
-        `This panel cannot draw the tab strip as "${layoutDoc.tab_strip}". ` +
-          'Set tabs to fixed, or update the panel firmware.'
+        !hello || connectedUrl !== deviceUrl
+          ? `Connect to this panel first: tabs set to "${layoutDoc.tab_strip}" ` +
+              'need a panel that lists that mode.'
+          : `This panel cannot draw the tab strip as "${layoutDoc.tab_strip}". ` +
+              'Set tabs to fixed, or update the panel firmware.'
       )
       return
     }
