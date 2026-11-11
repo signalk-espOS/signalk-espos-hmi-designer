@@ -307,20 +307,22 @@ interface GridSpec {
   h: number
 }
 
-// A stream sized for a single screen fills the page, so the fixed strip
-// that a second screen brings would crop its bottom on the panel.
+// A stream sized for a single screen fills the page, so a strip that
+// appears later (status bar, fixed tabs) would crop it on the panel.
+// Move it up first and shrink it only if it is taller than the page:
+// the capture is panel-sized, so a smaller stream crops more.
 function fitStreams(screens: Screen[], pageH: number): Screen[] {
+  const overflows = (w: Widget): boolean =>
+    w.type === 'stream' && w.y + w.h > pageH
   return screens.map((s) => {
-    if (!s.widgets.some((w) => w.type === 'stream' && w.y + w.h > pageH)) {
-      return s
-    }
+    if (!s.widgets.some(overflows)) return s
     return {
       ...s,
-      widgets: s.widgets.map((w) =>
-        w.type === 'stream' && w.y + w.h > pageH
-          ? { ...w, h: Math.max(1, pageH - w.y) }
-          : w
-      )
+      widgets: s.widgets.map((w) => {
+        if (!overflows(w)) return w
+        const h = Math.max(1, Math.min(w.h, pageH))
+        return { ...w, y: Math.max(0, pageH - h), h }
+      })
     }
   })
 }
@@ -1848,7 +1850,18 @@ export function App(): React.JSX.Element {
             <input
               type="checkbox"
               checked={statusOverlay}
-              onChange={(e) => setStatusOverlay(e.target.checked)}
+              onChange={(e) => {
+                const on = e.target.checked
+                setStatusOverlay(on)
+                if (on) {
+                  setScreens((prev) =>
+                    fitStreams(
+                      prev,
+                      displayH - STATUS_OVERLAY_HEIGHT - tabStripSpace
+                    )
+                  )
+                }
+              }}
             />
             status bar
           </label>
