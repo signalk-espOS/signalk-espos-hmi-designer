@@ -352,6 +352,9 @@ export interface Layout {
    *  between screens. Only relevant when `screens.length > 1`;
    *  ignored otherwise. Default 56 px. */
   tab_strip_height?: number
+  /** Where that tab strip sits. Default `fixed`. Push a value only to a
+   *  device that lists it in `/hello.display.tab_strip`. */
+  tab_strip?: TabStripMode
   /** Layout-wide color defaults, applied to the whole screen. `bg`
    *  fills the screen background (omit for the firmware's default
    *  dark theme). `fg` and `accent` are the fallback text/indicator
@@ -486,6 +489,9 @@ export interface HelloResponse {
     h: number
     idle_timeout?: boolean
     idle_dim_pct?: boolean
+    /** The `tab_strip` values the device draws. Absent on older
+     *  firmware, which draws every layout fixed. */
+    tab_strip?: string[]
   }
   widgets: Record<string, { fields: string[] }>
   active_layout_name?: string
@@ -506,6 +512,25 @@ export function mergeTheme(
   return Object.keys(defined).length > 0
     ? (defined as Layout['theme'])
     : undefined
+}
+
+/** Where a multi-screen layout's tab strip sits. `fixed`: below the
+ *  pages, which share the height with it. `overlay-bottom`: the pages
+ *  take the full height and the strip shows above their bottom after a
+ *  swipe up from the bottom edge, or a page swipe. */
+export type TabStripMode = 'fixed' | 'overlay-bottom'
+
+/** The tab strip modes a device draws; `fixed` is always among them. */
+export function tabStripModes(
+  hello: HelloResponse | null | undefined
+): TabStripMode[] {
+  const modes: TabStripMode[] = ['fixed']
+  // Checked as an array: a string would match by substring.
+  const listed = hello?.display?.tab_strip
+  if (Array.isArray(listed) && listed.includes('overlay-bottom')) {
+    modes.push('overlay-bottom')
+  }
+  return modes
 }
 
 /** Narrowing helper — verifies an unknown value matches HelloResponse. */
