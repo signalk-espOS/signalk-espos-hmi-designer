@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useRef } from 'react'
 import { colorForZoneState, isNestedBind, type MetaZone } from './api'
 import { NumberField } from './NumberField'
 import { PathPicker } from './PathPicker'
@@ -37,7 +37,8 @@ export function WidgetSheet(props: {
   infos: readonly PathInfo[]
   infoByPath: ReadonlyMap<string, PathInfo>
   displayW: number
-  displayH: number
+  /** Height of a page: the display minus the status and tab strips. */
+  pageH: number
   recent: readonly string[]
   knownPathSet: ReadonlySet<string>
   liveValue: (bind: string) => string | undefined
@@ -55,7 +56,7 @@ export function WidgetSheet(props: {
     infos,
     infoByPath,
     displayW,
-    displayH,
+    pageH,
     recent,
     knownPathSet,
     liveValue,
@@ -63,6 +64,14 @@ export function WidgetSheet(props: {
     applyBind,
     applyBarBind
   } = props
+  // Editor-only row keys for bargroup bars: an index key would hand an
+  // open path search to the next bar when one is removed.
+  const barIds = useRef<number[]>([])
+  const nextBarId = useRef(0)
+  const barCount = selected.type === 'bargroup' ? selected.bars.length : 0
+  while (barIds.current.length < barCount)
+    barIds.current.push(nextBarId.current++)
+  barIds.current.length = barCount
   const info = KIND_INFO[selected.type]
   const bind = 'bind' in selected ? (selected.bind ?? '') : ''
   const zones = bind ? props.zonesOf(bind) : undefined
@@ -171,7 +180,7 @@ export function WidgetSheet(props: {
                 <fieldset className="bands">
                   <legend>bars</legend>
                   {selected.bars.map((b, i) => (
-                    <div className="bar-card" key={i}>
+                    <div className="bar-card" key={barIds.current[i] ?? i}>
                       <input
                         value={b.label}
                         title="label"
@@ -216,6 +225,7 @@ export function WidgetSheet(props: {
                           const next = selected.bars.filter((_, j) => j !== i)
                           // Keep at least one bar; refuse to drop the last.
                           if (next.length === 0) return
+                          barIds.current.splice(i, 1)
                           updateWidget(selected.id, { bars: next })
                         }}
                         title="Remove bar"
@@ -562,26 +572,16 @@ export function WidgetSheet(props: {
               <>
                 <label>
                   min
-                  <input
-                    type="number"
+                  <NumberField
                     value={selected.min}
-                    onChange={(e) =>
-                      updateWidget(selected.id, {
-                        min: Number(e.target.value)
-                      })
-                    }
+                    onChange={(n) => updateWidget(selected.id, { min: n })}
                   />
                 </label>
                 <label>
                   max
-                  <input
-                    type="number"
+                  <NumberField
                     value={selected.max}
-                    onChange={(e) =>
-                      updateWidget(selected.id, {
-                        max: Number(e.target.value)
-                      })
-                    }
+                    onChange={(n) => updateWidget(selected.id, { max: n })}
                   />
                 </label>
               </>
@@ -651,32 +651,22 @@ export function WidgetSheet(props: {
                 </label>
                 <label>
                   scale
-                  <input
-                    type="number"
-                    step="any"
+                  <NumberField
                     value={selected.display?.scale ?? 1}
-                    onChange={(e) =>
+                    onChange={(n) =>
                       updateWidget(selected.id, {
-                        display: {
-                          ...(selected.display ?? {}),
-                          scale: Number(e.target.value)
-                        }
+                        display: { ...(selected.display ?? {}), scale: n }
                       })
                     }
                   />
                 </label>
                 <label>
                   offset
-                  <input
-                    type="number"
-                    step="any"
+                  <NumberField
                     value={selected.display?.offset ?? 0}
-                    onChange={(e) =>
+                    onChange={(n) =>
                       updateWidget(selected.id, {
-                        display: {
-                          ...(selected.display ?? {}),
-                          offset: Number(e.target.value)
-                        }
+                        display: { ...(selected.display ?? {}), offset: n }
                       })
                     }
                   />
@@ -765,23 +755,21 @@ export function WidgetSheet(props: {
                 <legend>bands</legend>
                 {(selected.bands ?? []).map((b, i) => (
                   <div className="band-row" key={i}>
-                    <input
-                      type="number"
+                    <NumberField
                       value={b.from}
                       title="from"
-                      onChange={(e) => {
+                      onChange={(n) => {
                         const next = [...(selected.bands ?? [])]
-                        next[i] = { ...b, from: Number(e.target.value) }
+                        next[i] = { ...b, from: n }
                         updateWidget(selected.id, { bands: next })
                       }}
                     />
-                    <input
-                      type="number"
+                    <NumberField
                       value={b.to}
                       title="to"
-                      onChange={(e) => {
+                      onChange={(n) => {
                         const next = [...(selected.bands ?? [])]
-                        next[i] = { ...b, to: Number(e.target.value) }
+                        next[i] = { ...b, to: n }
                         updateWidget(selected.id, { bands: next })
                       }}
                     />
@@ -902,7 +890,7 @@ export function WidgetSheet(props: {
                   min={0}
                   onChange={(n) =>
                     updateWidget(selected.id, {
-                      y: clampPx(n, 0, displayH - selected.h)
+                      y: clampPx(n, 0, pageH - selected.h)
                     })
                   }
                 />
@@ -926,7 +914,7 @@ export function WidgetSheet(props: {
                   min={1}
                   onChange={(n) =>
                     updateWidget(selected.id, {
-                      h: clampPx(n, 1, displayH - selected.y)
+                      h: clampPx(n, 1, pageH - selected.y)
                     })
                   }
                 />

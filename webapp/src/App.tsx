@@ -1843,6 +1843,7 @@ export function App(): React.JSX.Element {
   const menuBtnRef = useRef<HTMLButtonElement | null>(null)
   const deviceBtnRef = useRef<HTMLButtonElement | null>(null)
   const screensBtnRef = useRef<HTMLButtonElement | null>(null)
+  const activeTabRef = useRef<HTMLButtonElement | null>(null)
 
   // The panel is drawn at its own pixel size and scaled down to fit the
   // space between the widget list and the sheet; positions stay in
@@ -1898,6 +1899,12 @@ export function App(): React.JSX.Element {
     const info = pathInfoByPath.get(bind)
     const v = skValues.has(bind) ? skValues.get(bind) : info?.value
     return formatPathValue(v, info?.units)
+  }
+
+  const openWidget = (w: Widget): void => {
+    if (selectedId !== w.id) setSheetTab(firstTab(w))
+    setSelectedId(w.id)
+    setSheetOpen(true)
   }
 
   const duplicateWidget = (id: string): void => {
@@ -2304,6 +2311,7 @@ export function App(): React.JSX.Element {
             <button
               type="button"
               key={s.id}
+              ref={i === activeIdx ? activeTabRef : undefined}
               className={i === activeIdx ? 'on' : ''}
               aria-current={i === activeIdx ? 'page' : undefined}
               title={
@@ -2357,6 +2365,7 @@ export function App(): React.JSX.Element {
             open={screensOpen}
             onClose={() => setScreensOpen(false)}
             anchorRef={screensBtnRef}
+            altAnchorRef={activeTabRef}
             label="Screens"
             className="screens-pop"
           >
@@ -2987,8 +2996,7 @@ export function App(): React.JSX.Element {
                 transform: `scale(${fitScale})`
               }}
             >
-              {/* The wasm preview draws the panel's own strip. */}
-              {statusOverlay && previewMode !== 'wasm' && (
+              {statusOverlay && (
                 <div
                   className="canvas-overlay"
                   style={{ height: `${STATUS_OVERLAY_HEIGHT}px` }}
@@ -3044,13 +3052,20 @@ export function App(): React.JSX.Element {
                       <div
                         key={w.id}
                         className={`tile ${isSel ? 'sel' : ''}`}
+                        tabIndex={0}
+                        aria-label={`${KIND_INFO[w.type]?.name ?? w.type} ${('label' in w && w.label) || w.id}`}
+                        onKeyDown={(e) => {
+                          // Keys on the Edit, Duplicate and Delete buttons are theirs.
+                          if (e.target !== e.currentTarget) return
+                          if (e.key !== 'Enter' && e.key !== ' ') return
+                          e.preventDefault()
+                          openWidget(w)
+                        }}
                         onClick={(e) => {
                           e.stopPropagation()
                           // The click that ends a drag on the bar is no tap.
                           if (draggedRef.current) return
-                          if (selectedId !== w.id) setSheetTab(firstTab(w))
-                          setSelectedId(w.id)
-                          setSheetOpen(true)
+                          openWidget(w)
                         }}
                       >
                         {isSel && (
@@ -3189,7 +3204,11 @@ export function App(): React.JSX.Element {
             liveValue={liveValueOf}
             zonesOf={(b) => pathZones.get(b)}
             displayW={displayW}
-            displayH={displayH}
+            pageH={
+              displayH -
+              (statusOverlay ? STATUS_OVERLAY_HEIGHT : 0) -
+              tabStripSpace
+            }
             updateWidget={updateWidget}
             applyBind={applyBind}
             applyBarBind={applyBarBind}

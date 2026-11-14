@@ -8,13 +8,15 @@ export function Popover(props: {
   onClose: () => void
   /** The button that toggles it; a press there is left to its onClick. */
   anchorRef: React.RefObject<HTMLElement | null>
+  /** Another button that toggles it, such as the active screen tab. */
+  altAnchorRef?: React.RefObject<HTMLElement | null>
   align?: 'left' | 'right'
   className?: string
   label: string
   children: React.ReactNode
 }): React.JSX.Element | null {
   const ref = useRef<HTMLDivElement | null>(null)
-  const { open, anchorRef } = props
+  const { open, anchorRef, altAnchorRef } = props
   // Read through a ref: the parent passes a new arrow on every render,
   // and the listeners should not be swapped each time.
   const onCloseRef = useRef(props.onClose)
@@ -27,12 +29,22 @@ export function Popover(props: {
       if (!t) return
       if (ref.current?.contains(t)) return
       if (anchorRef.current?.contains(t)) return
+      if (altAnchorRef?.current?.contains(t)) return
       // A dialog opened from the popover (a confirmation) is not outside.
       if ((t as Element).closest?.('dialog, .modal-backdrop')) return
       onClose()
     }
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
+      if (e.key !== 'Escape') return
+      // The focused control unmounts with the panel; hand focus back to
+      // a visible toggle so a keyboard user keeps their place.
+      if (ref.current?.contains(document.activeElement)) {
+        const back = [anchorRef.current, altAnchorRef?.current].find(
+          (el) => el && el.offsetParent !== null
+        )
+        back?.focus()
+      }
+      onClose()
     }
     document.addEventListener('pointerdown', onDown)
     document.addEventListener('keydown', onKey)
@@ -40,7 +52,7 @@ export function Popover(props: {
       document.removeEventListener('pointerdown', onDown)
       document.removeEventListener('keydown', onKey)
     }
-  }, [open, anchorRef])
+  }, [open, anchorRef, altAnchorRef])
   if (!open) return null
   return (
     <div

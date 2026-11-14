@@ -47,6 +47,12 @@ export function NumberField(props: {
         lastCommitted.current = n
         props.onChange(n)
       }}
+      // The parent may clamp a value back to the one it already had, which
+      // changes no prop: show what was kept once the field is left.
+      onBlur={() => {
+        lastCommitted.current = props.value
+        setDraft(String(props.value))
+      }}
     />
   )
 }
