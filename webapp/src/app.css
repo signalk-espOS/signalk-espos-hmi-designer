@@ -1,11 +1,91 @@
+/* Editor themes. Day is the base; dark follows the system unless the
+   editor's own switch sets data-editor-theme. Night is red on black for
+   working in the cockpit after dark. The panel previews keep their own
+   colors: they mirror the device, not the editor. */
 :root {
-  --bg: #0d1117;
-  --panel: #161b22;
-  --fg: #e6edf3;
-  --muted: #8b949e;
-  --accent: #58a6ff;
+  --bg: #eef1f6;
+  --panel: #ffffff;
+  --panel-2: #f6f8fc;
+  --line: #d5dbe6;
+  --fg: #10203f;
+  --muted: #5d6984;
+  --accent: #003399;
+  --on-accent: #ffffff;
+  --hover: #e7edfb;
+  --field: #f6f8fc;
+  --ok: #1f8a3b;
+  --err: #c62828;
+  --danger-bg: #fdecec;
+  --danger-line: #f3b8b8;
+  --shadow: 0 8px 32px rgba(16, 32, 63, 0.18);
+  --touch: 32px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-editor-theme]) {
+    --bg: #0b1122;
+    --panel: #111a2f;
+    --panel-2: #16203a;
+    --line: #24304d;
+    --fg: #e6ebf5;
+    --muted: #8e9ab6;
+    --accent: #fbca02;
+    --on-accent: #10131a;
+    --hover: #1b2847;
+    --field: #0d1529;
+    --ok: #3fb950;
+    --err: #f85149;
+    --danger-bg: #3a1f1f;
+    --danger-line: #5a2a2a;
+    --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    color-scheme: dark;
+  }
+}
+
+:root[data-editor-theme='dark'] {
+  --bg: #0b1122;
+  --panel: #111a2f;
+  --panel-2: #16203a;
+  --line: #24304d;
+  --fg: #e6ebf5;
+  --muted: #8e9ab6;
+  --accent: #fbca02;
+  --on-accent: #10131a;
+  --hover: #1b2847;
+  --field: #0d1529;
   --ok: #3fb950;
   --err: #f85149;
+  --danger-bg: #3a1f1f;
+  --danger-line: #5a2a2a;
+  --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}
+
+:root[data-editor-theme='night'] {
+  --bg: #000000;
+  --panel: #0c0202;
+  --panel-2: #120303;
+  --line: #2e0808;
+  --fg: #e0322b;
+  --muted: #c0322a;
+  --accent: #b3261e;
+  --on-accent: #000000;
+  --hover: #1f0505;
+  --field: #080101;
+  --ok: #e0322b;
+  --err: #ff7a6e;
+  --danger-bg: #1f0505;
+  --danger-line: #5a1512;
+  --shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+
+/* Fingers, not a mouse: every control gets a 44 px target. */
+@media (pointer: coarse) {
+  :root {
+    --touch: 44px;
+  }
 }
 
 html, body, #root {
@@ -23,8 +103,9 @@ html, body, #root {
 }
 
 header {
-  padding: 6px 12px;
+  padding: 8px 12px;
   background: var(--panel);
+  border-bottom: 1px solid var(--line);
   display: flex;
   gap: 16px;
   align-items: center;
@@ -34,7 +115,16 @@ header {
 .brand {
   display: flex;
   gap: 8px;
-  align-items: baseline;
+  align-items: center;
+}
+
+/* The espOS signal square: blue by day, yellow on dark, red at night. */
+.brand-mark {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--accent);
+  flex: none;
 }
 
 .ver {
@@ -52,18 +142,25 @@ header {
   width: 240px;
   background: var(--bg);
   color: var(--fg);
-  border: 1px solid #30363d;
+  border: 1px solid var(--line);
   border-radius: 3px;
   padding: 4px 6px;
   font-family: ui-monospace, monospace;
   font-size: 12px;
 }
 
+/* Keeps the header on one line on a 1440 px wide screen. */
+@media (max-width: 1600px) {
+  .topbar-url {
+    width: 170px;
+  }
+}
+
 .topbar-devices {
   max-width: 230px;
   background: var(--bg);
   color: var(--fg);
-  border: 1px solid #30363d;
+  border: 1px solid var(--line);
   border-radius: 3px;
   padding: 4px 6px;
   font-size: 12px;
@@ -92,12 +189,17 @@ header {
   margin-left: auto;
 }
 .topbar-files button.danger {
-  background: #3a1f1f;
-  border-color: #5a2a2a;
-  color: #f85149;
+  background: var(--danger-bg);
+  border-color: var(--danger-line);
+  color: var(--err);
 }
 .topbar-files button.danger:hover {
-  background: #5a2a2a;
+  background: var(--danger-line);
+}
+
+/* Editor theme: a compact select, so the header stays on one line. */
+.editor-theme {
+  width: auto;
 }
 
 .topbar-toggle {
@@ -127,11 +229,26 @@ header {
   width: 200px;
 }
 .screen-title:hover {
-  border-color: #30363d;
+  border-color: var(--line);
 }
 .screen-title:focus {
   border-color: var(--accent);
   outline: none;
+}
+
+/* Device chrome mirrored on the canvas (tab strip, status strip). These
+   follow the panel, not the editor theme. */
+.grid-wrap {
+  --dev-strip: #161b22;
+  --dev-edge: #30363d;
+  --dev-tab: #21262d;
+  --dev-fg: #e6edf3;
+  --dev-accent: #58a6ff;
+  --dev-on-accent: #0d1117;
+  --dev-muted: #8b949e;
+  --dev-ghost: rgba(22, 27, 34, 0.35);
+  --dev-screen: #0d1117;
+  --dev-grid: rgba(255, 255, 255, 0.04);
 }
 
 /* Bottom tab strip inside grid-wrap — mirrors what the device
@@ -141,8 +258,8 @@ header {
   bottom: 0;
   left: 0;
   right: 0;
-  background: #161b22;
-  border-top: 1px solid #30363d;
+  background: var(--dev-strip);
+  border-top: 1px solid var(--dev-edge);
   display: flex;
   gap: 4px;
   padding: 4px;
@@ -152,37 +269,38 @@ header {
 /* Overlay strip: the tabs sit below the canvas, so the widgets under
    the strip stay editable, and a dashed band marks where it shows. */
 .canvas-tabs.below {
-  border: 1px dashed #30363d;
+  border: 1px dashed var(--dev-edge);
 }
 .canvas-tabs-ghost {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
-  border-top: 1px dashed var(--muted);
-  background: rgba(22, 27, 34, 0.35);
+  border-top: 1px dashed var(--dev-muted);
+  background: var(--dev-ghost);
   display: flex;
   align-items: center;
   justify-content: center;
   font-family: ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--dev-muted);
   z-index: 40;
   pointer-events: none;
 }
 .canvas-tabs .tab {
   flex: 1;
-  background: #21262d;
-  color: var(--fg);
+  min-height: 0;
+  background: var(--dev-tab);
   border: none;
   border-radius: 4px;
   font-size: 16px;
   cursor: pointer;
   position: relative;
+  color: var(--dev-fg);
 }
 .canvas-tabs .tab.active {
-  background: var(--accent);
-  color: #0d1117;
+  background: var(--dev-accent);
+  color: var(--dev-on-accent);
 }
 .canvas-tabs .tab .tab-x {
   position: absolute;
@@ -217,14 +335,14 @@ header {
   top: 0;
   left: 0;
   right: 0;
-  background: #161b22;
-  border-bottom: 1px solid #30363d;
+  background: var(--dev-strip);
+  border-bottom: 1px solid var(--dev-edge);
   display: flex;
   align-items: center;
   padding: 0 8px;
   font-family: ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--dev-muted);
   z-index: 1;
   pointer-events: none;
 }
@@ -240,8 +358,9 @@ header {
 
 .col {
   background: var(--panel);
+  border: 1px solid var(--line);
   padding: 12px;
-  border-radius: 6px;
+  border-radius: 10px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -266,32 +385,68 @@ label {
   color: var(--muted);
 }
 
+label input[type='checkbox'],
+label input[type='radio'] {
+  min-height: 0;
+}
+
+/* Path filter above the SK paths list. */
+.col.right > input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: var(--touch);
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  background: var(--field);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
 label input, label textarea {
   display: block;
   width: 100%;
   box-sizing: border-box;
   margin-top: 2px;
   padding: 4px 6px;
-  background: var(--bg);
+  min-height: var(--touch);
+  background: var(--field);
   color: var(--fg);
-  border: 1px solid #30363d;
-  border-radius: 3px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
   font-family: ui-monospace, monospace;
   font-size: 12px;
 }
 
 button {
-  background: #21262d;
+  background: var(--panel-2);
   color: var(--fg);
-  border: 1px solid #30363d;
+  border: 1px solid var(--line);
   padding: 4px 10px;
-  border-radius: 4px;
+  min-height: var(--touch);
+  border-radius: 6px;
   cursor: pointer;
   font-size: 12px;
 }
 
-button:hover { background: #30363d; }
-button.primary { background: var(--accent); color: #000; border-color: var(--accent); }
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+select {
+  min-height: var(--touch);
+  background: var(--field);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+button:hover { background: var(--hover); }
+button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
 button.x { padding: 0 6px; font-size: 14px; }
 
 .err { color: var(--err); font-size: 12px; }
@@ -304,8 +459,9 @@ button.x { padding: 0 6px; font-size: 14px; }
 
 .canvas {
   background: var(--panel);
+  border: 1px solid var(--line);
   padding: 12px;
-  border-radius: 6px;
+  border-radius: 10px;
   overflow: auto;
 }
 
@@ -325,12 +481,12 @@ button.x { padding: 0 6px; font-size: 14px; }
 }
 
 .grid-wrap {
-  background: var(--bg);
+  background-color: var(--dev-screen);
   /* width / height / background-size are set inline from the device's
      /hello display dimensions so the canvas is 1:1 with the panel. */
   position: relative;
-  background-image: linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+  background-image: linear-gradient(var(--dev-grid) 1px, transparent 1px),
+                    linear-gradient(90deg, var(--dev-grid) 1px, transparent 1px);
 }
 
 /* The grid item itself: invisible until selected. Click-target only. */
@@ -361,7 +517,7 @@ button.x { padding: 0 6px; font-size: 14px; }
   right: -2px;
   height: 20px;
   background: var(--accent);
-  color: #000;
+  color: var(--on-accent);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -377,8 +533,9 @@ button.x { padding: 0 6px; font-size: 14px; }
 
 .chrome .x {
   background: rgba(0, 0, 0, 0.15);
-  color: #000;
+  color: var(--on-accent);
   border: none;
+  min-height: 0;
   padding: 0 6px;
   font-size: 14px;
   font-weight: 700;
@@ -387,6 +544,19 @@ button.x { padding: 0 6px; font-size: 14px; }
   cursor: pointer;
 }
 .chrome .x:hover { background: rgba(0, 0, 0, 0.3); }
+/* On a touch screen the bar above the tile grows so delete is a full
+   44 px target; it still sits outside the tile, clear of its handles. */
+@media (pointer: coarse) {
+  .chrome {
+    top: -46px;
+    height: 44px;
+    padding-right: 0;
+  }
+  .chrome .x {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
 
 /* modal (Notifications config) */
 .modal-backdrop {
@@ -408,7 +578,7 @@ button.x { padding: 0 6px; font-size: 14px; }
   display: flex;
   flex-direction: column;
   gap: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow);
 }
 .modal h3 {
   margin: 0;
@@ -442,7 +612,7 @@ dialog.modal::backdrop {
 /* Secondary action inside a modal: the shape of a button, no fill. */
 button.ghost {
   background: transparent;
-  border: 1px solid #30363d;
+  border: 1px solid var(--line);
   color: var(--muted);
 }
 button.ghost:hover {
@@ -462,7 +632,42 @@ button.ghost:hover {
   color: var(--muted);
 }
 
-.palette { display: flex; flex-wrap: wrap; gap: 4px; }
+/* Widget library: one row per kind, icon + name, filterable. */
+.palette-search {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: var(--touch);
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  background: var(--field);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.palette {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+  gap: 6px;
+}
+.palette button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  min-height: max(var(--touch), 36px);
+  padding: 4px 10px;
+}
+.palette svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
 .props label input { width: 100%; }
 
@@ -483,4 +688,4 @@ button.ghost:hover {
   border-radius: 2px;
 }
 
-.paths li:hover { background: #21262d; color: var(--accent); }
+.paths li:hover { background: var(--hover); color: var(--accent); }

@@ -24,6 +24,15 @@ import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 
 import { WasmCanvas } from './WasmCanvas'
+import { KIND_INFO, kindMatches } from './widgetIcons'
+import {
+  EDITOR_THEMES,
+  applyEditorTheme,
+  loadEditorTheme,
+  parseEditorTheme,
+  saveEditorTheme,
+  type EditorTheme
+} from './editorTheme'
 import {
   NOTIFICATION_STATES,
   REPEAT_OPTIONS,
@@ -497,6 +506,12 @@ export function App(): React.JSX.Element {
     }
     return DEFAULT_DEVICE_URL
   })
+  const [editorTheme, setEditorTheme] = useState<EditorTheme>(loadEditorTheme)
+  useEffect(() => {
+    applyEditorTheme(editorTheme)
+    saveEditorTheme(editorTheme)
+  }, [editorTheme])
+  const [kindFilter, setKindFilter] = useState<string>('')
   const [hello, setHello] = useState<HelloResponse | null>(null)
   const [helloErr, setHelloErr] = useState<string | null>(null)
   // Backlight brightness (percent). null = not loaded or unsupported by the
@@ -1798,6 +1813,7 @@ export function App(): React.JSX.Element {
     >
       <header>
         <div className="brand">
+          <span className="brand-mark" aria-hidden="true" />
           <strong>HMI Designer</strong>
           <span className="ver">v{__PLUGIN_VERSION__}</span>
         </div>
@@ -2002,6 +2018,19 @@ export function App(): React.JSX.Element {
           {fileMsg && <span className="muted small">{fileMsg}</span>}
         </div>
         <div className="topbar-files">
+          <select
+            className="editor-theme"
+            aria-label="Editor theme"
+            title="How the editor looks. The panel's own theme is set under Theme."
+            value={editorTheme}
+            onChange={(e) => setEditorTheme(parseEditorTheme(e.target.value))}
+          >
+            {EDITOR_THEMES.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.id === 'auto' ? 'Editor: Auto' : `Editor: ${t.label}`}
+              </option>
+            ))}
+          </select>
           <button onClick={() => void onSave()} title="Save to SK server">
             Save
           </button>
@@ -2350,12 +2379,27 @@ export function App(): React.JSX.Element {
         {/* ---- left column: palette + selected props ---- */}
         <aside className="col left" onClick={(e) => e.stopPropagation()}>
           <h3>Add widget</h3>
+          <input
+            className="palette-search"
+            type="search"
+            aria-label="Search widgets"
+            placeholder="Search widgets"
+            value={kindFilter}
+            onChange={(e) => setKindFilter(e.target.value)}
+          />
           <div className="palette">
-            {availableKinds.map((k) => (
-              <button key={k} onClick={() => addWidget(k)}>
-                + {k}
-              </button>
-            ))}
+            {availableKinds
+              .filter((k) => kindMatches(k, kindFilter))
+              .map((k) => (
+                <button
+                  key={k}
+                  onClick={() => addWidget(k)}
+                  title={`Add ${KIND_INFO[k].name} (${k})`}
+                >
+                  {KIND_INFO[k].icon}
+                  {KIND_INFO[k].name}
+                </button>
+              ))}
           </div>
 
           <h3>Selected</h3>
@@ -3208,7 +3252,7 @@ export function App(): React.JSX.Element {
                     >
                       {isSel && (
                         <div className="chrome">
-                          <span>{w.type}</span>
+                          <span>{KIND_INFO[w.type]?.name ?? w.type}</span>
                           <button
                             className="x"
                             onMouseDown={(e) => e.stopPropagation()}
