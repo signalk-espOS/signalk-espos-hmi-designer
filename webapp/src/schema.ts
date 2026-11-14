@@ -363,7 +363,7 @@ export interface Layout {
    *  the same zone > per-widget override > this > firmware-hardcoded-
    *  default precedence used everywhere else. Omit any field to keep
    *  the firmware default for it. */
-  theme?: { bg?: string; fg?: string; accent?: string }
+  theme?: LayoutTheme
   /** Layout-level alert-overlay configuration. Default behaviour
    *  when omitted: enabled, min_state="alarm", modal ack. */
   notifications?: NotificationsConfig
@@ -492,10 +492,75 @@ export interface HelloResponse {
     /** The `tab_strip` values the device draws. Absent on older
      *  firmware, which draws every layout fixed. */
     tab_strip?: string[]
+    /** The `theme.mode` values the device accepts. Absent on firmware
+     *  without panel themes. */
+    themes?: string[]
+    /** The theme on screen now. */
+    theme?: string
   }
   widgets: Record<string, { fields: string[] }>
   active_layout_name?: string
   layout_source?: string
+}
+
+/** The panel's color themes. `auto` follows SignalK `environment.mode`:
+ *  night after sunset, `day_base` by day. */
+export type PanelThemeMode = 'auto' | 'day' | 'dark' | 'night'
+export const PANEL_THEME_MODES: readonly PanelThemeMode[] = [
+  'auto',
+  'day',
+  'dark',
+  'night'
+]
+/** A resolved theme, the one actually on screen. */
+export type PanelTheme = Exclude<PanelThemeMode, 'auto'>
+
+export interface LayoutTheme {
+  bg?: string
+  fg?: string
+  accent?: string
+  /** Push only to a device that lists the mode in `/hello.display.themes`. */
+  mode?: PanelThemeMode
+  /** What `auto` shows by day. */
+  day_base?: 'day' | 'dark'
+}
+
+/** What `auto` shows by day: `day_base`, or dark when the layout sets its
+ *  own colors, since those were picked for the dark panel. Mirrors the
+ *  firmware's default. */
+export function dayBase(theme: LayoutTheme | undefined): 'day' | 'dark' {
+  if (theme?.day_base) return theme.day_base
+  return theme?.bg || theme?.fg || theme?.accent ? 'dark' : 'day'
+}
+
+/** The theme a preview shows: the preview pick when it is not `auto`,
+ *  else the layout's mode, else its day base (the preview has no sun). */
+export function resolvePanelTheme(
+  theme: LayoutTheme | undefined,
+  preview: PanelThemeMode = 'auto'
+): PanelTheme {
+  if (preview !== 'auto') return preview
+  const mode = theme?.mode
+  if (mode && mode !== 'auto') return mode
+  return dayBase(theme)
+}
+
+/** Screen background per theme, from the firmware's palettes. */
+export const PANEL_SCREEN: Record<PanelTheme, string> = {
+  day: '#eef1f6',
+  dark: '#0a1022',
+  night: '#000000'
+}
+
+/** The theme modes a device accepts in `theme.mode`; empty on firmware
+ *  without panel themes. */
+export function panelThemeModes(
+  hello: HelloResponse | null | undefined
+): PanelThemeMode[] {
+  // Checked as an array: a string would match by substring.
+  const listed = hello?.display?.themes
+  if (!Array.isArray(listed)) return []
+  return PANEL_THEME_MODES.filter((m) => listed.includes(m))
 }
 
 /** Apply a patch to a layout's theme block and drop the block once no
