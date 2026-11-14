@@ -119,15 +119,18 @@ const withCString = <T,>(
 const applyScreen = (
   mod: JlpWasmModule,
   screen: Screen,
-  theme: Layout['theme']
+  theme: Layout['theme'],
+  statusOverlay: boolean
 ): string | null => {
   // Wrap the single screen into the top-level layout shape the
   // wasm bridge expects. The theme rides along so the preview paints
   // the same background and default colours as the panel; a bundle
   // built before the entry point learned about it ignores the block.
+  // status_overlay moves the page below the panel's status strip.
   const doc = {
     schema: 1,
     name: 'designer',
+    status_overlay: statusOverlay,
     ...(theme ? { theme } : {}),
     screens: [screen]
   }
@@ -371,7 +374,12 @@ export function WasmCanvas({
           modReady.UTF8ToString(setTheme(p))
         )
       : ''
-    const err = applyScreen(modReady, previewScreen, layout.theme)
+    const err = applyScreen(
+      modReady,
+      previewScreen,
+      layout.theme,
+      layout.status_overlay ?? true
+    )
     if (err) {
       onStatus?.(`apply: ${err}`)
       return
