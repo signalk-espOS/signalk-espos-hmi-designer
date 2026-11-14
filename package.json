@@ -37,6 +37,9 @@
   "signalk": {
     "displayName": "espOS HMI Designer",
     "appIcon": "icon.svg",
+    "screenshots": [
+      "./screenshots/hmi-designer.png"
+    ],
     "webapp": {
       "name": "espOS HMI Designer",
       "description": "Drag-and-drop layout designer for runtime-rendering HMI displays"
