@@ -13,7 +13,13 @@
 // wasm bridge with the new screen's widget list.
 
 import React, { useEffect, useRef, useState } from 'react'
-import type { Layout, Screen } from './schema'
+import {
+  PANEL_SCREEN,
+  resolvePanelTheme,
+  type Layout,
+  type PanelThemeMode,
+  type Screen
+} from './schema'
 import type { MetaZone, NotificationRow } from './api'
 import type { SkValue } from './skStream'
 import {
@@ -33,6 +39,8 @@ interface JlpWasmModule extends ResizableWasm {
   _jlp_set_value_bool: (pathPtr: number, v: number) => void
   _jlp_set_path_meta: (pathPtr: number, metaJsonPtr: number) => void
   _jlp_set_notifications: (snapshotJsonPtr: number) => void
+  /** Missing from bundles built before the panel themes. */
+  _jlp_set_theme?: (modePtr: number) => number
   _malloc: (n: number) => number
   _free: (p: number) => void
   stringToUTF8: (str: string, ptr: number, maxBytes: number) => void
@@ -236,6 +244,9 @@ export interface WasmCanvasProps {
    *  same rows the device's list shows. Empty / undefined means
    *  "no notifications" — the wasm registry will clear. */
   notifications?: NotificationRow[]
+  /** Panel theme to preview: `auto` follows the layout's `theme.mode`,
+   *  the others override it the way the panel's own setting does. */
+  panelTheme?: PanelThemeMode
   /** Called with status / error strings so the toolbar can surface them. */
   onStatus?: (msg: string) => void
 }
@@ -250,6 +261,7 @@ export function WasmCanvas({
   skValues,
   notifications,
   visible,
+  panelTheme = 'auto',
   onStatus
 }: WasmCanvasProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -346,6 +358,15 @@ export function WasmCanvas({
           : w
       )
     }
+    // Before the apply, so the build below already uses it. Setting it
+    // also rebuilds the previous layout, which costs a few ms.
+    const setTheme = modReady._jlp_set_theme
+    if (setTheme) {
+      const themeErr = withCString(modReady, panelTheme, (p) =>
+        modReady.UTF8ToString(setTheme(p))
+      )
+      if (themeErr) onStatus?.(`theme: ${themeErr}`)
+    }
     const err = applyScreen(modReady, previewScreen, layout.theme)
     if (err) {
       onStatus?.(`apply: ${err}`)
@@ -367,8 +388,11 @@ export function WasmCanvas({
     pathDescriptions,
     skValues,
     notifications,
+    panelTheme,
     onStatus
   ])
+
+  const shown = resolvePanelTheme(layout.theme, panelTheme)
 
   return (
     <canvas
@@ -391,7 +415,11 @@ export function WasmCanvas({
         pointerEvents: 'none',
         // The wasm screen paints the theme background itself; this only
         // shows around it and while the module loads, so keep it in step.
-        background: layout.theme?.bg ?? '#0d1117'
+        // Night ignores the layout's bg, as the panel does.
+        background:
+          shown !== 'night' && layout.theme?.bg
+            ? layout.theme.bg
+            : PANEL_SCREEN[shown]
       }}
     />
   )
