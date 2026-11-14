@@ -544,6 +544,19 @@ button.x { padding: 0 6px; font-size: 14px; }
   cursor: pointer;
 }
 .chrome .x:hover { background: rgba(0, 0, 0, 0.3); }
+/* On a touch screen the bar above the tile grows so delete is a full
+   44 px target; it still sits outside the tile, clear of its handles. */
+@media (pointer: coarse) {
+  .chrome {
+    top: -46px;
+    height: 44px;
+    padding-right: 0;
+  }
+  .chrome .x {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
 
 /* modal (Notifications config) */
 .modal-backdrop {

@@ -3252,7 +3252,7 @@ export function App(): React.JSX.Element {
                     >
                       {isSel && (
                         <div className="chrome">
-                          <span>{KIND_INFO[w.type].name}</span>
+                          <span>{KIND_INFO[w.type]?.name ?? w.type}</span>
                           <button
                             className="x"
                             onMouseDown={(e) => e.stopPropagation()}
