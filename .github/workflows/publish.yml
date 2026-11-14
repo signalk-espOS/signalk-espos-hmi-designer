@@ -238,7 +238,10 @@ jobs:
 
       # The whole gate, not just prepublishOnly's build: lint and tests too.
       # It builds, so npm publish below skips prepublishOnly's second build.
+      # REQUIRE_WASM fails the build if the WASM preview bundle is missing.
       - run: npm run build:all
+        env:
+          REQUIRE_WASM: "1"
 
       - name: Publish to npm
         env:

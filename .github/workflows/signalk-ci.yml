@@ -75,6 +75,22 @@ jobs:
       enable-armv7: false
       enable-signalk-integration: false
 
+  # The plugin build tolerates a missing WASM bundle so the Signal K plugin
+  # registry can build offline. Only the publish job requires it, so check
+  # here that it can still be fetched, before a release depends on it.
+  wasm-bundle:
+    if: ${{ github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: bash scripts/copy-wasm.sh
+        env:
+          REQUIRE_WASM: "1"
+
   # ── Manual runs (workflow_dispatch with custom inputs) ────
   test-plugin-manual:
     if: ${{ github.event_name == 'workflow_dispatch' }}

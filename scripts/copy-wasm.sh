@@ -10,9 +10,9 @@
 #      the sibling repo isn't checked out — without this the published
 #      package ships no wasm and the designer's WASM canvas 404s).
 #
-# Still doesn't fail the build if the bundle can't be obtained at all —
-# the WASM preview just won't load — but the curl fallback means a
-# normal CI publish gets it.
+# Only a release build (REQUIRE_WASM=1) fails if the bundle can't be
+# obtained at all; any other build goes on and the WASM preview just
+# won't load.
 
 set -e
 
@@ -32,28 +32,38 @@ if [[ -f "${SRC}/jlp_wasm.js" && -f "${SRC}/jlp_wasm.wasm" ]]; then
 fi
 
 echo "[copy-wasm] no local bundle at ${SRC}; fetching from ${RAW_BASE}" >&2
-if curl -fsSL "${RAW_BASE}/jlp_wasm.js"   -o "${DEST}/jlp_wasm.js" && \
-   curl -fsSL "${RAW_BASE}/jlp_wasm.wasm" -o "${DEST}/jlp_wasm.wasm"; then
+# Download beside the target and move into place only when both files
+# arrived, so a failed fetch never removes a bundle an earlier build staged.
+# The timeouts keep a network that drops packets from stalling the build.
+fetch() {
+  curl -fsSL --connect-timeout 10 --max-time 120 "${RAW_BASE}/$1" -o "${DEST}/$1.part"
+}
+if fetch jlp_wasm.js && fetch jlp_wasm.wasm; then
+  mv -f "${DEST}/jlp_wasm.js.part"   "${DEST}/jlp_wasm.js"
+  mv -f "${DEST}/jlp_wasm.wasm.part" "${DEST}/jlp_wasm.wasm"
   echo "[copy-wasm] fetched $(du -h "${DEST}/jlp_wasm.wasm" | cut -f1) wasm + glue"
   exit 0
 fi
+rm -f "${DEST}/jlp_wasm.js.part" "${DEST}/jlp_wasm.wasm.part"
 
-# Clean up any partial download so a broken bundle isn't served.
-rm -f "${DEST}/jlp_wasm.js" "${DEST}/jlp_wasm.wasm"
-echo "[copy-wasm] could not obtain wasm bundle — WASM preview will be unavailable" >&2
-echo "[copy-wasm] (build espos-p4-cockpit-wasm or check ${RAW_BASE})" >&2
-# Fail loudly in CI / release so a package can't be published without the
-# wasm (the exact "blank WASM canvas" regression this fallback prevents).
-# Local dev stays soft so a missing bundle doesn't block a normal build.
-# Match common truthy CI values (GitHub sets CI=true; others use 1/yes/on),
-# case-insensitively, so a non-"true" runner can't slip through.
-ci_flag="$(printf '%s' "${CI:-}" | tr '[:upper:]' '[:lower:]')"
-case "${ci_flag}" in
-  true | 1 | yes | on) ci_required=1 ;;
-  *) ci_required=0 ;;
-esac
-if [[ "${ci_required}" == "1" || "${REQUIRE_WASM:-0}" == "1" ]]; then
-  echo "[copy-wasm] wasm is required in CI/release mode — failing build" >&2
+# Fail loudly when publishing (publish.yml sets REQUIRE_WASM=1; true, yes and
+# on count too) so a package can't reach npm without the wasm, the "blank WASM
+# canvas" regression this fallback prevents. Every other build stays soft: the
+# Signal K plugin registry builds the source with no network (firejail
+# --net=none) and CI=true, and failing there scores the tests "not-runnable"
+# although the tests never load the wasm.
+require_flag="$(printf '%s' "${REQUIRE_WASM:-}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${require_flag}" =~ ^(1|true|yes|on)$ ]]; then
+  echo "[copy-wasm] could not fetch the wasm bundle, which a release build requires" >&2
+  echo "[copy-wasm] (build espos-p4-cockpit-wasm or check ${RAW_BASE})" >&2
   exit 1
 fi
+
+if [[ -f "${DEST}/jlp_wasm.js" && -f "${DEST}/jlp_wasm.wasm" ]]; then
+  echo "[copy-wasm] fetch failed; keeping the bundle already in ${DEST}" >&2
+  exit 0
+fi
+
+echo "[copy-wasm] could not obtain wasm bundle — WASM preview will be unavailable" >&2
+echo "[copy-wasm] (build espos-p4-cockpit-wasm or check ${RAW_BASE})" >&2
 exit 0
