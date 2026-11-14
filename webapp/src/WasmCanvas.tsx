@@ -361,12 +361,11 @@ export function WasmCanvas({
     // Before the apply, so the build below already uses it. Setting it
     // also rebuilds the previous layout, which costs a few ms.
     const setTheme = modReady._jlp_set_theme
-    if (setTheme) {
-      const themeErr = withCString(modReady, panelTheme, (p) =>
-        modReady.UTF8ToString(setTheme(p))
-      )
-      if (themeErr) onStatus?.(`theme: ${themeErr}`)
-    }
+    const themeErr = setTheme
+      ? withCString(modReady, panelTheme, (p) =>
+          modReady.UTF8ToString(setTheme(p))
+        )
+      : ''
     const err = applyScreen(modReady, previewScreen, layout.theme)
     if (err) {
       onStatus?.(`apply: ${err}`)
@@ -377,7 +376,10 @@ export function WasmCanvas({
     // succeeds. Re-pushing every known value here is cheap and
     // covers both fresh applies and downstream value updates.
     pushAllValues(modReady, skValues)
-    onStatus?.(sizeWarning.current ?? `${screen.widgets.length} widgets`)
+    onStatus?.(
+      sizeWarning.current ??
+        (themeErr ? `theme: ${themeErr}` : `${screen.widgets.length} widgets`)
+    )
   }, [
     modReady,
     displayW,

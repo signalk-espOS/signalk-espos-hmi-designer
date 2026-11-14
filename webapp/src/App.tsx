@@ -1730,9 +1730,9 @@ export function App(): React.JSX.Element {
         !hello || connectedUrl !== deviceUrl
           ? 'Connect to this panel first: the layout picks a panel theme, ' +
               'which needs a panel that lists it.'
-          : 'This panel has no day, dark and night themes. Set the panel ' +
-              'theme to firmware default under Theme, or update the panel ' +
-              'firmware.'
+          : 'This panel has no day, dark and night themes. Under Theme, set ' +
+              'both panel theme and by day to their defaults, or update the ' +
+              'panel firmware.'
       )
       return
     }
@@ -2360,11 +2360,18 @@ export function App(): React.JSX.Element {
               panel theme
               <select
                 value={themeConfig?.mode ?? ''}
-                onChange={(e) =>
-                  updateTheme({
-                    mode: PANEL_THEME_MODES.find((m) => m === e.target.value)
-                  })
-                }
+                onChange={(e) => {
+                  const mode = PANEL_THEME_MODES.find(
+                    (m) => m === e.target.value
+                  )
+                  // by day only matters for auto, and its select hides
+                  // otherwise: keep no value the dialog cannot show.
+                  updateTheme(
+                    mode === undefined || mode === 'auto'
+                      ? { mode }
+                      : { mode, day_base: undefined }
+                  )
+                }}
                 title="Day is light for sunlight, dark is the classic look, night is red on black. Auto switches to night at sunset."
               >
                 <option value="">firmware default (auto)</option>
