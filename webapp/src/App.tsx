@@ -49,8 +49,13 @@ import {
   parseFirmwareVersion,
   STATUS_OVERLAY_HEIGHT,
   firmwareMeets,
+  dayBase,
   mergeTheme,
+  PANEL_THEME_MODES,
+  panelThemeModes,
+  resolvePanelTheme,
   tabStripModes,
+  type PanelThemeMode,
   type TabStripMode
 } from './schema'
 
@@ -561,6 +566,9 @@ export function App(): React.JSX.Element {
     undefined
   )
   const [showThemeModal, setShowThemeModal] = useState<boolean>(false)
+  // Which panel theme the canvas shows. `auto` follows the layout; the
+  // others preview a theme without changing the layout.
+  const [previewTheme, setPreviewTheme] = useState<PanelThemeMode>('auto')
   // Clearing the last set field should drop the whole `theme` block
   // rather than leave a stray `{}` in the exported layout.
   const updateTheme = (patch: Partial<NonNullable<Layout['theme']>>): void => {
@@ -799,6 +807,8 @@ export function App(): React.JSX.Element {
   const tabOverlay = showTabStrip && tabStrip === 'overlay-bottom'
   const tabStripSpace = showTabStrip && !tabOverlay ? tabStripHeight : 0
   const tabModes = useMemo(() => tabStripModes(hello), [hello])
+  const themeModes = useMemo(() => panelThemeModes(hello), [hello])
+  const shownTheme = resolvePanelTheme(themeConfig, previewTheme)
   const tabBelowOffset = tabStripHeight + TAB_BELOW_GAP
   const fixedStripPageH =
     displayH - (statusOverlay ? STATUS_OVERLAY_HEIGHT : 0) - tabStripHeight
@@ -1703,6 +1713,29 @@ export function App(): React.JSX.Element {
       )
       return
     }
+    // Firmware without panel themes would draw its old dark colors
+    // whatever the layout says, so the mode must come from the panel
+    // being pushed to.
+    const wantMode = layoutDoc.theme?.mode
+    const wantsThemes =
+      wantMode !== undefined || layoutDoc.theme?.day_base !== undefined
+    if (
+      wantsThemes &&
+      (!hello ||
+        connectedUrl !== deviceUrl ||
+        themeModes.length === 0 ||
+        (wantMode !== undefined && !themeModes.includes(wantMode)))
+    ) {
+      setPushErr(
+        !hello || connectedUrl !== deviceUrl
+          ? 'Connect to this panel first: the layout picks a panel theme, ' +
+              'which needs a panel that lists it.'
+          : 'This panel has no day, dark and night themes. Under Theme, set ' +
+              'both panel theme and by day to their defaults, or update the ' +
+              'panel firmware.'
+      )
+      return
+    }
     // The preview resolves a nested bind client-side, but the layout
     // reaches the panel with the bind as typed, and the firmware
     // subscribes to it literally: the widget would show nothing. Refuse
@@ -2031,6 +2064,22 @@ export function App(): React.JSX.Element {
               </option>
             ))}
           </select>
+          <select
+            className="editor-theme"
+            aria-label="Panel theme preview"
+            title="Which panel theme the canvas shows. Layout follows the theme set under Theme; the others only change the preview."
+            value={previewTheme}
+            onChange={(e) =>
+              setPreviewTheme(
+                PANEL_THEME_MODES.find((m) => m === e.target.value) ?? 'auto'
+              )
+            }
+          >
+            <option value="auto">Panel: as layout</option>
+            <option value="day">Panel: Day</option>
+            <option value="dark">Panel: Dark</option>
+            <option value="night">Panel: Night</option>
+          </select>
           <button onClick={() => void onSave()} title="Save to SK server">
             Save
           </button>
@@ -2306,6 +2355,65 @@ export function App(): React.JSX.Element {
               Layout-wide defaults. Zone state and a widget's own bg_color/
               fg_color always win over these — they only apply where neither one
               does. Clear a field to fall back to the firmware default.
+            </p>
+            <label>
+              panel theme
+              <select
+                value={themeConfig?.mode ?? ''}
+                onChange={(e) => {
+                  const mode = PANEL_THEME_MODES.find(
+                    (m) => m === e.target.value
+                  )
+                  // by day only matters for auto, and its select hides
+                  // otherwise: keep no value the dialog cannot show.
+                  updateTheme(
+                    mode === undefined || mode === 'auto'
+                      ? { mode }
+                      : { mode, day_base: undefined }
+                  )
+                }}
+                title="Day is light for sunlight, dark is the classic look, night is red on black. Auto switches to night at sunset."
+              >
+                <option value="">firmware default (auto)</option>
+                <option value="auto">auto: night after sunset</option>
+                <option value="day">day</option>
+                <option value="dark">dark</option>
+                <option value="night">night</option>
+              </select>
+            </label>
+            {(themeConfig?.mode ?? 'auto') === 'auto' && (
+              <label>
+                by day
+                <select
+                  value={themeConfig?.day_base ?? ''}
+                  onChange={(e) =>
+                    updateTheme({
+                      day_base:
+                        e.target.value === 'day' || e.target.value === 'dark'
+                          ? e.target.value
+                          : undefined
+                    })
+                  }
+                  title="What auto shows between sunrise and sunset"
+                >
+                  <option value="">default ({dayBase(themeConfig)})</option>
+                  <option value="day">day</option>
+                  <option value="dark">dark</option>
+                </select>
+              </label>
+            )}
+            {(themeConfig?.mode !== undefined ||
+              themeConfig?.day_base !== undefined) &&
+              themeModes.length === 0 && (
+                <p className="muted small">
+                  {hello
+                    ? 'This panel does not list panel themes; it will refuse the push until its firmware is updated.'
+                    : 'Connect to the panel to check it supports panel themes.'}
+                </p>
+              )}
+            <p className="muted small">
+              The panel's own setting (its settings menu or cockpit.theme) wins
+              over this when it is not auto.
             </p>
             <label>
               screen background
@@ -3157,6 +3265,7 @@ export function App(): React.JSX.Element {
           {/* Deselect on click bubbles up to the app root. */}
           <div
             className="grid-wrap"
+            data-panel-theme={shownTheme}
             style={{
               width: `${displayW}px`,
               height: `${displayH}px`,
@@ -3212,6 +3321,7 @@ export function App(): React.JSX.Element {
               skValues={previewValues}
               notifications={notifications}
               visible={previewMode === 'wasm'}
+              panelTheme={previewTheme}
               onStatus={setWasmStatus}
             />
             <div

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
+  dayBase,
+  panelThemeModes,
+  resolvePanelTheme,
   firmwareMeets,
   isHelloResponse,
   mergeTheme,
@@ -12,6 +15,7 @@ import {
   type SliderWidget,
   type Widget,
   type WidgetKind,
+  type HelloResponse,
   type Layout
 } from '../webapp/src/schema'
 
@@ -304,5 +308,40 @@ describe('tab strip modes', () => {
 
   it('ignores modes this designer does not know', () => {
     expect(tabStripModes(hello(['fixed', 'overlay-left']))).toEqual(['fixed'])
+  })
+})
+
+describe('panel themes', () => {
+  const withThemes = (themes: unknown): HelloResponse =>
+    ({
+      schema: 1,
+      widgets: {},
+      display: { w: 1024, h: 600, themes }
+    }) as HelloResponse
+
+  it('lists only the modes the device names', () => {
+    expect(
+      panelThemeModes(withThemes(['auto', 'day', 'dark', 'night']))
+    ).toEqual(['auto', 'day', 'dark', 'night'])
+    expect(panelThemeModes(withThemes(['day', 'sepia']))).toEqual(['day'])
+  })
+
+  it('treats a missing or non-array list as no themes', () => {
+    expect(panelThemeModes(null)).toEqual([])
+    expect(panelThemeModes(withThemes(undefined))).toEqual([])
+    expect(panelThemeModes(withThemes('auto,day'))).toEqual([])
+  })
+
+  it('defaults auto by day to dark only when the layout sets colors', () => {
+    expect(dayBase(undefined)).toBe('day')
+    expect(dayBase({ accent: '#ff0000' })).toBe('dark')
+    expect(dayBase({ bg: '#000000', day_base: 'day' })).toBe('day')
+  })
+
+  it('lets the preview pick win over the layout mode', () => {
+    expect(resolvePanelTheme({ mode: 'night' })).toBe('night')
+    expect(resolvePanelTheme({ mode: 'night' }, 'day')).toBe('day')
+    expect(resolvePanelTheme({ mode: 'auto', day_base: 'dark' })).toBe('dark')
+    expect(resolvePanelTheme(undefined)).toBe('day')
   })
 })

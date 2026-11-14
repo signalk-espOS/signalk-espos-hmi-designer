@@ -251,6 +251,45 @@ header {
   --dev-grid: rgba(255, 255, 255, 0.04);
 }
 
+/* The panel's palettes (cockpit main/jlp/theme.h), picked by the theme the
+   canvas shows. */
+.grid-wrap[data-panel-theme='day'] {
+  --dev-strip: #ffffff;
+  --dev-edge: #dde3ee;
+  --dev-tab: #eef1f6;
+  --dev-fg: #0b1630;
+  --dev-accent: #003399;
+  --dev-on-accent: #ffffff;
+  --dev-muted: #5b6680;
+  --dev-ghost: rgba(255, 255, 255, 0.45);
+  --dev-screen: #eef1f6;
+  --dev-grid: rgba(11, 22, 48, 0.06);
+}
+.grid-wrap[data-panel-theme='dark'] {
+  --dev-strip: #0f1729;
+  --dev-edge: #223052;
+  --dev-tab: #1a2643;
+  --dev-fg: #eef2fa;
+  --dev-accent: #fbca02;
+  --dev-on-accent: #0a1022;
+  --dev-muted: #8a96b3;
+  --dev-ghost: rgba(15, 23, 41, 0.35);
+  --dev-screen: #0a1022;
+  --dev-grid: rgba(255, 255, 255, 0.04);
+}
+.grid-wrap[data-panel-theme='night'] {
+  --dev-strip: #0a0101;
+  --dev-edge: #2e0808;
+  --dev-tab: #1a0404;
+  --dev-fg: #e0322b;
+  --dev-accent: #c62828;
+  --dev-on-accent: #000000;
+  --dev-muted: #8a1f1a;
+  --dev-ghost: rgba(10, 1, 1, 0.35);
+  --dev-screen: #000000;
+  --dev-grid: rgba(224, 50, 43, 0.06);
+}
+
 /* Bottom tab strip inside grid-wrap — mirrors what the device
    renders. Pinned at bottom; tap to switch screens. */
 .canvas-tabs {
