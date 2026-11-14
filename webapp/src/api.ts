@@ -1,6 +1,7 @@
 // API helpers. All device traffic goes through the plugin's
 // /device-proxy so the browser doesn't see cross-origin requests.
 
+import { collectPathInfo, type PathInfo } from './pathSearch'
 import {
   isHelloResponse,
   SCHEMA_VERSION,
@@ -128,18 +129,14 @@ export async function saveLayout(layout: Layout): Promise<void> {
 }
 
 /**
- * Returns all SignalK paths currently published on this server, by
- * walking GET /signalk/v1/api/vessels/self. Returns an alphabetically
- * sorted list.
+ * Every SignalK path currently published on this server, with its
+ * description, units and the value it had when fetched, by walking
+ * GET /signalk/v1/api/vessels/self. Sorted by path.
  */
-export async function fetchSelfPaths(): Promise<string[]> {
+export async function fetchSelfPathInfo(): Promise<PathInfo[]> {
   const r = await fetch('/signalk/v1/api/vessels/self')
   if (!r.ok) throw new Error(`signalk self: ${r.status}`)
-  const data = (await r.json()) as unknown
-  const paths: string[] = []
-  walk('', data, paths)
-  paths.sort()
-  return paths
+  return collectPathInfo((await r.json()) as unknown)
 }
 
 /**
@@ -435,27 +432,6 @@ function parseFormula(formula: string): { scale: number; offset: number } {
     return { scale: n === 0 ? 1 : 1 / n, offset: 0 }
   }
   return { scale: 1, offset: 0 }
-}
-
-function walk(prefix: string, node: unknown, out: string[]): void {
-  if (typeof node !== 'object' || node === null) return
-  const obj = node as Record<string, unknown>
-  // A SignalK leaf node is an object with `value` (or `values`) and
-  // `timestamp`. Detect leaves and stop recursing into their internals.
-  if ('value' in obj && 'timestamp' in obj) {
-    if (prefix) out.push(prefix)
-    return
-  }
-  if ('values' in obj && 'timestamp' in obj) {
-    if (prefix) out.push(prefix)
-    return
-  }
-  for (const [k, v] of Object.entries(obj)) {
-    // SignalK uses dot-paths under vessels.self; we already start
-    // walking *inside* vessels.self so we don't prefix it.
-    const next = prefix ? `${prefix}.${k}` : k
-    walk(next, v, out)
-  }
 }
 
 /** A cockpit panel the plugin found on the LAN via mDNS. */

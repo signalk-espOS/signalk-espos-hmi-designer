@@ -119,15 +119,18 @@ const withCString = <T,>(
 const applyScreen = (
   mod: JlpWasmModule,
   screen: Screen,
-  theme: Layout['theme']
+  theme: Layout['theme'],
+  statusOverlay: boolean
 ): string | null => {
   // Wrap the single screen into the top-level layout shape the
   // wasm bridge expects. The theme rides along so the preview paints
   // the same background and default colours as the panel; a bundle
   // built before the entry point learned about it ignores the block.
+  // status_overlay moves the page below the panel's status strip.
   const doc = {
     schema: 1,
     name: 'designer',
+    status_overlay: statusOverlay,
     ...(theme ? { theme } : {}),
     screens: [screen]
   }
@@ -249,6 +252,10 @@ export interface WasmCanvasProps {
   panelTheme?: PanelThemeMode
   /** Called with status / error strings so the toolbar can surface them. */
   onStatus?: (msg: string) => void
+  /** Shown size relative to the device, set through the canvas's CSS
+   *  size. A CSS transform on an ancestor instead throws off the SDL
+   *  WebGL output, which reads the element's on-screen box. */
+  cssScale?: number
 }
 
 export function WasmCanvas({
@@ -262,7 +269,8 @@ export function WasmCanvas({
   notifications,
   visible,
   panelTheme = 'auto',
-  onStatus
+  onStatus,
+  cssScale = 1
 }: WasmCanvasProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [modReady, setModReady] = useState<JlpWasmModule | null>(null)
@@ -366,7 +374,12 @@ export function WasmCanvas({
           modReady.UTF8ToString(setTheme(p))
         )
       : ''
-    const err = applyScreen(modReady, previewScreen, layout.theme)
+    const err = applyScreen(
+      modReady,
+      previewScreen,
+      layout.theme,
+      layout.status_overlay ?? true
+    )
     if (err) {
       onStatus?.(`apply: ${err}`)
       return
@@ -408,7 +421,10 @@ export function WasmCanvas({
         // instant.
         display: visible ? 'block' : 'none',
         position: 'absolute',
-        inset: 0,
+        top: 0,
+        left: 0,
+        width: `${displayW * cssScale}px`,
+        height: `${displayH * cssScale}px`,
         // Sit BEHIND tile chrome (the chrome bar bumps to z=50 in
         // wasm mode via app.css; outline stays visible via
         // !important on the same selector). pointer-events: none so

@@ -102,16 +102,6 @@ html, body, #root {
   height: 100%;
 }
 
-header {
-  padding: 8px 12px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
 .brand {
   display: flex;
   gap: 8px;
@@ -127,118 +117,9 @@ header {
   flex: none;
 }
 
-.ver {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.topbar-device {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.topbar-url {
-  width: 240px;
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  padding: 4px 6px;
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-}
-
-/* Keeps the header on one line on a 1440 px wide screen. */
-@media (max-width: 1600px) {
-  .topbar-url {
-    width: 170px;
-  }
-}
-
-.topbar-devices {
-  max-width: 230px;
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  padding: 4px 6px;
-  font-size: 12px;
-}
-
-.topbar-status {
-  flex: 1;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  font-size: 12px;
-  color: var(--muted);
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.topbar-hello code { color: var(--fg); }
-
-/* File ops toolbar pinned to the far right of the header. */
-.topbar-files {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  margin-left: auto;
-}
-.topbar-files button.danger {
-  background: var(--danger-bg);
-  border-color: var(--danger-line);
-  color: var(--err);
-}
-.topbar-files button.danger:hover {
-  background: var(--danger-line);
-}
-
-/* Editor theme: a compact select, so the header stays on one line. */
-.editor-theme {
-  width: auto;
-}
-
-.topbar-toggle {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--muted);
-  cursor: pointer;
-  margin: 0;
-}
-.topbar-toggle input {
-  margin: 0;
-}
-
-/* Inline-editable screen title in the canvas h3. Render the stored
-   value verbatim — uppercasing here would lie about what the device
-   actually displays. */
-.screen-title {
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--fg);
-  font-size: 13px;
-  font-weight: normal;
-  padding: 2px 4px;
-  border-radius: 3px;
-  width: 200px;
-}
-.screen-title:hover {
-  border-color: var(--line);
-}
-.screen-title:focus {
-  border-color: var(--accent);
-  outline: none;
-}
-
 /* Device chrome mirrored on the canvas (tab strip, status strip). These
    follow the panel, not the editor theme. */
-.grid-wrap {
+.canvas-stage {
   --dev-strip: #161b22;
   --dev-edge: #30363d;
   --dev-tab: #21262d;
@@ -253,7 +134,7 @@ header {
 
 /* The panel's palettes (cockpit main/jlp/theme.h), picked by the theme the
    canvas shows. */
-.grid-wrap[data-panel-theme='day'] {
+.canvas-stage[data-panel-theme='day'] {
   --dev-strip: #ffffff;
   --dev-edge: #dde3ee;
   --dev-tab: #eef1f6;
@@ -265,7 +146,7 @@ header {
   --dev-screen: #eef1f6;
   --dev-grid: rgba(11, 22, 48, 0.06);
 }
-.grid-wrap[data-panel-theme='dark'] {
+.canvas-stage[data-panel-theme='dark'] {
   --dev-strip: #0f1729;
   --dev-edge: #223052;
   --dev-tab: #1a2643;
@@ -277,7 +158,7 @@ header {
   --dev-screen: #0a1022;
   --dev-grid: rgba(255, 255, 255, 0.04);
 }
-.grid-wrap[data-panel-theme='night'] {
+.canvas-stage[data-panel-theme='night'] {
   --dev-strip: #0a0101;
   --dev-edge: #2e0808;
   --dev-tab: #1a0404;
@@ -356,17 +237,6 @@ header {
   background: rgba(0, 0, 0, 0.2);
 }
 
-/* Below-canvas tools row: add-tab button + hint text. */
-.canvas-tools {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-top: 8px;
-}
-.canvas-tools .small {
-  font-size: 11px;
-}
-
 /* Dummy status strip in the canvas — mirrors the device's
    StatusOverlay so the designer's geometry stays honest. */
 .canvas-overlay {
@@ -386,37 +256,6 @@ header {
   pointer-events: none;
 }
 
-.cols {
-  display: grid;
-  grid-template-columns: 280px 1fr 320px;
-  gap: 8px;
-  padding: 8px;
-  flex: 1;
-  min-height: 0;
-}
-
-.col {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  padding: 12px;
-  border-radius: 10px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-
-.col h3 {
-  margin: 12px 0 6px;
-  font-size: 13px;
-  text-transform: uppercase;
-  color: var(--muted);
-  letter-spacing: 0.5px;
-}
-
-.col h3:first-child { margin-top: 0; }
-
 label {
   display: block;
   margin: 6px 0;
@@ -427,19 +266,6 @@ label {
 label input[type='checkbox'],
 label input[type='radio'] {
   min-height: 0;
-}
-
-/* Path filter above the SK paths list. */
-.col.right > input {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: var(--touch);
-  margin-bottom: 6px;
-  padding: 4px 8px;
-  background: var(--field);
-  color: var(--fg);
-  border: 1px solid var(--line);
-  border-radius: 6px;
 }
 
 label input, label textarea {
@@ -492,25 +318,6 @@ button.x { padding: 0 6px; font-size: 14px; }
 .ok  { color: var(--ok);  font-size: 12px; }
 .muted { color: var(--muted); font-size: 12px; }
 
-.hello { font-size: 12px; color: var(--muted); margin: 6px 0; }
-.hello code { color: var(--fg); }
-
-
-.canvas {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  padding: 12px;
-  border-radius: 10px;
-  overflow: auto;
-}
-
-.canvas h3 {
-  margin: 0 0 8px;
-  font-size: 13px;
-  color: var(--muted);
-  text-transform: uppercase;
-}
-
 /* Force GridLayout to fill the full canvas-content area so widgets
    can be dragged into the lower portion. Without this, RGL auto-
    sizes based on the lowest-placed widget and leaves no drop zone
@@ -519,13 +326,11 @@ button.x { padding: 0 6px; font-size: 14px; }
   height: 100% !important;
 }
 
+/* Positioned in device pixels and scaled to fit; it carries the tiles,
+   the chrome strips and the mirror image, above the wasm preview. */
 .grid-wrap {
-  background-color: var(--dev-screen);
-  /* width / height / background-size are set inline from the device's
-     /hello display dimensions so the canvas is 1:1 with the panel. */
   position: relative;
-  background-image: linear-gradient(var(--dev-grid) 1px, transparent 1px),
-                    linear-gradient(90deg, var(--dev-grid) 1px, transparent 1px);
+  z-index: 11;
 }
 
 /* The grid item itself: invisible until selected. Click-target only. */
@@ -537,6 +342,12 @@ button.x { padding: 0 6px; font-size: 14px; }
      widget's actual look. Selected gets a frame + chrome (below). */
 }
 
+.tile:focus-visible {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+  z-index: 12;
+}
+
 .tile.sel {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -546,55 +357,6 @@ button.x { padding: 0 6px; font-size: 14px; }
      mode. Unselected tiles can stay at auto (they're click targets
      only; their previews live in the canvas underneath). */
   z-index: 20;
-}
-
-/* Selection chrome — only rendered when selected. */
-.chrome {
-  position: absolute;
-  top: -22px;
-  left: -2px;
-  right: -2px;
-  height: 20px;
-  background: var(--accent);
-  color: var(--on-accent);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 6px;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  cursor: move;
-  border-radius: 3px 3px 0 0;
-  z-index: 2;
-}
-
-.chrome .x {
-  background: rgba(0, 0, 0, 0.15);
-  color: var(--on-accent);
-  border: none;
-  min-height: 0;
-  padding: 0 6px;
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 18px;
-  border-radius: 2px;
-  cursor: pointer;
-}
-.chrome .x:hover { background: rgba(0, 0, 0, 0.3); }
-/* On a touch screen the bar above the tile grows so delete is a full
-   44 px target; it still sits outside the tile, clear of its handles. */
-@media (pointer: coarse) {
-  .chrome {
-    top: -46px;
-    height: 44px;
-    padding-right: 0;
-  }
-  .chrome .x {
-    min-width: 44px;
-    min-height: 44px;
-  }
 }
 
 /* modal (Notifications config) */
@@ -671,35 +433,26 @@ button.ghost:hover {
   color: var(--muted);
 }
 
-/* Widget library: one row per kind, icon + name, filterable. */
-.palette-search {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: var(--touch);
-  padding: 4px 8px;
-  margin-bottom: 6px;
-  background: var(--field);
-  color: var(--fg);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  font-size: 12px;
+.props label input { width: 100%; }
+
+/* ---------- editor layout ----------
+   One toolbar row, then the workspace: the widget list on the left, the
+   canvas in the middle, and the widget sheet over the right edge (wide
+   landscape) or rising from the bottom (portrait, phone). */
+.hmi-app {
+  --bar-h: 56px;
+  --rail-w: 72px;
+  --rail-open-w: 264px;
+  --sheet-w: 360px;
+  --sheet-h: min(58vh, 640px);
+  --ctl: max(var(--touch), 40px);
+  overflow: hidden;
 }
-.palette {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
-  gap: 6px;
-}
-.palette button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  text-align: left;
-  min-height: max(var(--touch), 36px);
-  padding: 4px 10px;
-}
+
+.ui-icon,
 .palette svg {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   flex: none;
   fill: none;
   stroke: currentColor;
@@ -708,23 +461,992 @@ button.ghost:hover {
   stroke-linejoin: round;
 }
 
-.props label input { width: 100%; }
-
-.paths {
-  list-style: none;
+.icon-btn {
+  width: var(--ctl);
+  height: var(--ctl);
+  min-height: var(--ctl);
   padding: 0;
-  margin: 4px 0 0;
+  display: inline-grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  border-radius: 10px;
+  flex: none;
+}
+.icon-btn:hover,
+.icon-btn[aria-expanded='true'],
+.icon-btn[aria-pressed='true'] {
+  background: var(--hover);
+}
+
+button.danger,
+.pop-item.danger {
+  color: var(--err);
+}
+
+/* ---- toolbar ---- */
+.topbar {
+  height: var(--bar-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 max(10px, env(safe-area-inset-right, 0px)) 0
+    max(10px, env(safe-area-inset-left, 0px));
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  min-width: 0;
+  position: relative;
+  z-index: 40;
+}
+.brand {
+  font-size: 15px;
+  margin: 0 4px;
+  flex: none;
+}
+.topbar-spacer {
+  flex: 1;
+  min-width: 4px;
+}
+
+.screen-tabs {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin-left: 6px;
+}
+.screen-tabs::-webkit-scrollbar {
+  display: none;
+}
+.screen-tabs button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  height: var(--ctl);
+  padding: 0 12px;
+  border-radius: 9px;
+  flex: none;
+}
+.screen-tabs button.on {
+  background: var(--hover);
+  color: var(--fg);
+  font-weight: 600;
+}
+.screen-tabs button.add {
+  width: var(--ctl);
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+.screens-anchor {
+  display: none;
+}
+.screen-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--ctl);
+  font-size: 14px;
+  font-weight: 600;
+  max-width: 220px;
+}
+.screen-select-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+  flex: none;
+}
+.segmented button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  height: calc(var(--ctl) - 6px);
+  min-height: 0;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.segmented button.on {
+  background: var(--panel);
+  color: var(--fg);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.device-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--ctl);
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  max-width: 220px;
+}
+.device-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+.device-chip.on .dot,
+.dot.on {
+  background: var(--ok);
+}
+.device-chip.err .dot,
+.dot.err {
+  background: var(--err);
+}
+
+.push-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--ctl);
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 14px;
+  flex: none;
+}
+
+/* ---- popovers (menu, screens, panel connection) ---- */
+.pop-anchor {
+  position: relative;
+  flex: none;
+}
+.popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 50;
+  width: 300px;
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - var(--bar-h) - 20px);
+  overflow-y: auto;
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 6px;
+  white-space: normal;
+}
+.popover.left {
+  left: 0;
+}
+.popover.right {
+  right: 0;
+}
+.popover hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 6px 0;
+}
+.pop-group {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 8px 10px 4px;
+}
+.pop-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--ctl);
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 14px;
+  padding: 0 10px;
+  border-radius: 9px;
+}
+.pop-item .ui-icon {
+  color: var(--muted);
+}
+.pop-item.danger .ui-icon {
+  color: var(--err);
+}
+.pop-item.on {
+  background: var(--hover);
+  font-weight: 600;
+}
+.pop-item .muted {
+  margin-left: auto;
+}
+.pop-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: var(--ctl);
+  padding: 0 10px;
+  margin: 0;
+  font-size: 14px;
+  color: var(--fg);
+}
+.pop-row select,
+.pop-row input[type='range'] {
+  width: auto;
+  max-width: 50%;
+}
+.pop-row input[type='checkbox'] {
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  margin: 0;
+  display: inline-block;
+}
+.pop-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 4px;
+}
+.pop-section label {
+  margin: 0 6px;
+}
+.pop-section .pop-row label,
+.pop-section .pop-row {
+  margin: 0;
+}
+.pop-foot {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 8px 10px 4px;
+}
+.device-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+}
+.device-head .muted {
+  margin-left: auto;
+}
+.device-pop p {
+  margin: 0 6px;
+}
+.mono {
+  font-family: ui-monospace, monospace;
+}
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0 6px;
+}
+.props .grid-2 {
+  margin: 0;
+}
+.narrow-only {
+  display: none;
+}
+
+/* ---- messages under the toolbar ---- */
+.notices {
+  position: fixed;
+  top: calc(var(--bar-h) + 8px);
+  right: 12px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(420px, calc(100vw - 24px));
+}
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 12px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+.notice span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.notice.ok {
+  border-left: 4px solid var(--ok);
+}
+.notice.err {
+  border-left: 4px solid var(--err);
+  color: var(--err);
+}
+
+/* ---- workspace ---- */
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+
+.rail {
+  flex: none;
+  width: var(--rail-w);
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 10px max(10px, env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  transition: width 0.18s ease;
+}
+.rail-open .rail {
+  width: var(--rail-open-w);
+}
+.rail-head {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  padding-left: 2px;
+}
+.rail-open .rail-head {
+  display: flex;
+}
+.rail-close {
+  display: none;
+}
+.palette-search {
+  display: none;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: var(--ctl);
+  padding: 4px 10px;
+  background: var(--field);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  font-size: 13px;
+}
+.rail-open .palette-search {
+  display: block;
+}
+.palette {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+.rail-open .palette {
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.palette button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: max(var(--touch), 44px);
+  padding: 0 8px;
+  border-color: transparent;
+  background: transparent;
+  border-radius: 10px;
+  font-size: 13px;
+  text-align: left;
+}
+.palette button span {
+  display: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rail-open .palette button {
+  justify-content: flex-start;
+  border-color: var(--line);
+  background: var(--panel-2);
+}
+.rail-open .palette button span {
+  display: inline;
+}
+
+.canvas {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow: hidden;
+  position: relative;
+}
+.canvas-stage {
+  position: relative;
+  flex: none;
+}
+/* The panel's screen and grid lines, at the shown scale. */
+.canvas-stage::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--screen-h);
+  background-color: var(--dev-screen);
+  background-image: linear-gradient(var(--dev-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--dev-grid) 1px, transparent 1px);
+  background-size: var(--grid-size);
+  background-position: var(--grid-pos);
+}
+.canvas-stage > .grid-wrap {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+}
+.canvas-foot {
+  flex: none;
+  height: 28px;
+  margin-top: 8px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.canvas-foot label.inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.canvas-foot input[type='range'] {
+  width: 120px;
+  min-height: 0;
+  margin: 0;
+}
+
+/* Selection bar above the tile: the drag handle, with edit, duplicate
+   and delete. Counter-scaled so it stays finger-sized on a scaled-down
+   canvas. */
+.chrome {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: -2px;
+  transform-origin: bottom left;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  cursor: move;
+  white-space: nowrap;
+  z-index: 2;
+  touch-action: none;
+}
+.chrome.below {
+  bottom: auto;
+  top: calc(100% + 4px);
+  transform-origin: top left;
+}
+.chrome-grip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  min-height: 36px;
+}
+.chrome-grip .ui-icon {
+  color: var(--muted);
+}
+.chrome button {
+  width: 36px;
+  height: 36px;
+  min-height: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.chrome button:hover {
+  background: var(--hover);
+}
+@media (pointer: coarse) {
+  .chrome-grip,
+  .chrome button {
+    min-height: 44px;
+  }
+  .chrome button {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+.fab {
+  display: none;
+}
+
+/* ---- widget sheet ---- */
+.sheet {
+  position: absolute;
+  z-index: 30;
+  top: 10px;
+  right: 10px;
+  bottom: 10px;
+  width: var(--sheet-w);
+  max-width: calc(100% - 20px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.sheet-open .canvas {
+  padding-right: calc(var(--sheet-w) + 26px);
+}
+.sheet-grab {
+  display: none;
+  width: 40px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--line);
+  margin: 8px auto 0;
+  flex: none;
+}
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px 6px 14px;
+  flex: none;
+}
+.sheet-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: var(--hover);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.sheet-icon svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.sheet-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.sheet-title strong {
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheet-title span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.sheet-tabs {
+  display: flex;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.sheet-tabs button {
+  flex: 1;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  min-height: var(--ctl);
+}
+.sheet-tabs button.on {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.sheet-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sheet-body > p {
+  margin: 4px 0;
+}
+.sheet-foot {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px max(10px, env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--line);
+}
+.sheet-foot button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--ctl);
+  padding: 0 12px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
+.field-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.zones {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.zones li {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  font-size: 13px;
+}
+.zones i {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+}
+.props fieldset.bands {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px;
+  margin: 6px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.props .band-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.props .band-row input {
+  min-width: 0;
+  flex: 1;
+  min-height: var(--touch);
+  background: var(--field);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.props .bar-card {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.props .bar-card > input:first-child,
+.props .bar-card > .path-picker {
+  grid-column: 1 / -1;
+}
+.props .bar-card input {
+  min-width: 0;
+  min-height: var(--touch);
+  background: var(--field);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
+/* ---- path picker ---- */
+.path-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.path-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: max(var(--touch), 44px);
+  padding: 6px 10px;
+  background: var(--field);
+  border-radius: 9px;
+  text-align: left;
+}
+.path-current .ui-icon {
+  color: var(--muted);
+}
+.path-current .path {
+  flex: 1;
+  min-width: 0;
   font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.path-current .path.empty {
+  color: var(--muted);
+  font-family: inherit;
+}
+.path-current .live {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--muted);
+  flex: none;
+}
+.path-desc {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 2px;
+}
+.path-search {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.path-search input[type='search'] {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: var(--ctl);
+  padding: 4px 10px;
+  background: var(--field);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  font-size: 14px;
+}
+.chips {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.chips button {
+  flex: none;
+  min-height: 32px;
+  border-radius: 999px;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+}
+.chips button.on {
+  background: var(--hover);
+  color: var(--fg);
+  border-color: transparent;
+}
+.path-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.path-results button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  border-radius: 8px;
+}
+.path-results button.on {
+  background: var(--hover);
+}
+.path-results .path {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.path-results .desc {
+  grid-column: 1;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.path-results .val {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 600;
+}
+.path-results .more {
+  padding: 8px;
+}
+.path-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.paths li {
-  padding: 2px 4px;
-  cursor: pointer;
-  border-radius: 2px;
+/* ---- narrower: one toolbar row stays one row ---- */
+@media (max-width: 1100px) {
+  .screen-tabs {
+    display: none;
+  }
+  .screens-anchor {
+    display: block;
+  }
+  .wide-only {
+    display: none;
+  }
+  .narrow-only {
+    display: flex;
+  }
 }
 
-.paths li:hover { background: var(--hover); color: var(--accent); }
+/* Portrait and small screens: the sheet rises from the bottom and the
+   canvas moves up above it. */
+@media (max-width: 899px), (orientation: portrait) {
+  .sheet {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-width: none;
+    height: var(--sheet-h);
+    border-radius: 18px 18px 0 0;
+    border-bottom: none;
+  }
+  .sheet-grab {
+    display: block;
+  }
+  .sheet-open .canvas {
+    padding-right: 16px;
+    padding-bottom: calc(var(--sheet-h) + 8px);
+    justify-content: flex-start;
+  }
+}
+
+/* Phone: the widget list is a drawer behind the + button. */
+@media (max-width: 640px) {
+  .hmi-app {
+    --bar-h: 52px;
+  }
+  .rail-toggle,
+  .brand strong,
+  .device-name,
+  .push-label {
+    display: none;
+  }
+  .push-btn {
+    padding: 0 12px;
+  }
+  .rail {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 35;
+    width: 0;
+    padding: 0;
+    border-right: none;
+  }
+  .rail-open .rail {
+    width: min(300px, 86vw);
+    padding: 10px;
+    border-right: 1px solid var(--line);
+    box-shadow: var(--shadow);
+  }
+  .rail-close {
+    display: grid;
+  }
+  .canvas {
+    padding: 10px;
+  }
+  .fab {
+    display: grid;
+    place-items: center;
+    position: absolute;
+    left: 14px;
+    bottom: max(14px, env(safe-area-inset-bottom, 0px));
+    z-index: 25;
+    width: 56px;
+    height: 56px;
+    border-radius: 18px;
+    background: var(--accent);
+    color: var(--on-accent);
+    border: none;
+    box-shadow: var(--shadow);
+  }
+  .fab .ui-icon {
+    width: 26px;
+    height: 26px;
+  }
+  .sheet-open .fab {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail {
+    transition: none;
+  }
+}
