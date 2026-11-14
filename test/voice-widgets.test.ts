@@ -14,6 +14,10 @@ const APP = readFileSync(
   fileURLToPath(new URL('../webapp/src/App.tsx', import.meta.url)),
   'utf8'
 )
+const BINDS = readFileSync(
+  fileURLToPath(new URL('../webapp/src/widgetBinds.ts', import.meta.url)),
+  'utf8'
+)
 const SCHEMA = readFileSync(
   fileURLToPath(new URL('../webapp/src/schema.ts', import.meta.url)),
   'utf8'
@@ -50,10 +54,7 @@ describe('voice widget kinds', () => {
   it('take no SignalK bind', () => {
     // The device ignores a bind on these; offering the field would invite a
     // path that silently does nothing.
-    const set = APP.slice(
-      APP.indexOf('PANEL_LOCAL_KINDS'),
-      APP.indexOf('function defaultWidget')
-    )
+    const set = BINDS.slice(BINDS.indexOf('PANEL_LOCAL_KINDS'))
     for (const k of VOICE_KINDS) expect(set).toContain(`'${k}'`)
   })
 })

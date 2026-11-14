@@ -11,7 +11,7 @@ Reference target: [espos-p4-cockpit](https://github.com/dirkwa/espos-p4-cockpit)
 Install as a SignalK plugin; open the **espOS HMI Designer** webapp from the SK admin UI:
 
 1. **Connect** to a device URL. The designer GETs `/hello` to learn the widget catalog, display size, advertised capabilities (screenshot formats, idle-timeout support, ...) and the currently-active layout name.
-2. **Drag widgets** onto a canvas sized to the device's display. Bind each to a SignalK path picked from the live path list on this server. A bind may also reach into an object-valued path by appending the field name, e.g. `navigation.position.latitude`: the designer subscribes to `navigation.position`, reads `latitude` from each update and takes zones and units from the parent path's metadata. This resolves in the designer preview only. The panel firmware subscribes to binds as literal SignalK paths and cannot read a field inside an object value, so Push refuses a layout that contains such a bind until the firmware supports it.
+2. **Add widgets** from the list on the left onto a canvas sized to the device's display, and move them by the bar above the selected widget. Tapping a widget opens its sheet (data, display, colors, position); its path is picked there from a search over this server's paths, by path or description, with each path's current value. A bind may also reach into an object-valued path by appending the field name, e.g. `navigation.position.latitude`: the designer subscribes to `navigation.position`, reads `latitude` from each update and takes zones and units from the parent path's metadata. This resolves in the designer preview only. The panel firmware subscribes to binds as literal SignalK paths and cannot read a field inside an object value, so Push refuses a layout that contains such a bind until the firmware supports it.
 3. **Push layout** — POSTs the JSON via a server-side proxy to the device's `/layout`, which stages it offscreen, swaps atomically, and persists to LittleFS on success.
 
 ## Preview modes
@@ -21,10 +21,11 @@ The canvas always shows the device's render result, never an approximation. Two 
 - **WASM (default)** — the firmware's `widget_factory.cpp` compiled to WebAssembly via [espos-p4-cockpit-wasm](https://github.com/signalk-espOS/espos-p4-cockpit-wasm). Renders pixel-identically to what the device draws, offline, no panel needed. Live SK values flow into the WASM canvas so widget fills / values / zone colors update as you design.
 - **Mirror** — when a device is connected, polls `/screenshot?fmt=jpeg` and renders the actual panel framebuffer. True WYSIWYG including any state the WASM can't simulate (notifications overlay, runtime artifacts).
 
-Toggle with the **WASM / Mirror** buttons above the canvas.
+Toggle with the **Preview / Mirror** switch in the toolbar (in the menu on a narrow screen).
 
 ## Designer features
 
+- **Touch first**: one toolbar row (menu, screens, preview, panel connection, Push), a widget list that collapses to icons, and the canvas scaled to the space left, so it works on a tablet or a phone as well as a desktop.
 - **Multi-screen** layouts with a tab strip rendered at the canvas bottom (height matches the device). Add, rename, delete screens; **drag-and-drop tab reorder** (via `@dnd-kit`).
 - **Save / Load** to the SK server (persists across browser refresh, via the plugin's `/layout` endpoint).
 - **Export / Import** as a JSON file.
@@ -32,8 +33,8 @@ Toggle with the **WASM / Mirror** buttons above the canvas.
 - **Copy / Paste** the selected widget with Ctrl/Cmd-C and Ctrl/Cmd-V (respects focused inputs).
 - **Display formatting auto-derived from SK metadata** — `unit`, `scale`, `offset`, and `decimals` populate from the path's `displayUnits` formula when you pick a path or load an existing layout (so a ratio path automatically shows as a percentage when SK says so).
 - **Zone-aware coloring** — paths whose SK metadata declares `zones` colorize widgets per state (nominal / alert / warn / alarm / emergency, maritime-helm palette). The firmware fetches zone meta over REST per path on push, so even paths SK doesn't broadcast meta for still get the right colors.
-- **Notifications modal** in the toolbar — opts the device's alert overlay in/out, picks the `min_state` threshold.
-- **Display modal** in the toolbar — idle-backlight timeout and dim-to brightness (gated on `/hello.display.idle_timeout`). Higher dim levels keep tap-wake working; lower levels need notifications or a fresh push to wake the panel.
+- **Alert overlay** in the menu — opts the device's alert overlay in/out, picks the `min_state` threshold.
+- **Display power save** in the menu — idle-backlight timeout and dim-to brightness (gated on `/hello.display.idle_timeout`). Higher dim levels keep tap-wake working; lower levels need notifications or a fresh push to wake the panel.
 
 ## Widget kinds
 

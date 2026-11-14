@@ -22,7 +22,9 @@ Two halves in one repo:
 |-------------------------------------------------------------------------------|----------------------------------------------|
 | [README.md](README.md)                                                        | Feature list + dev workflow                  |
 | [webapp/src/schema.ts](webapp/src/schema.ts)                                  | **The single source of truth** for types     |
-| [webapp/src/App.tsx](webapp/src/App.tsx)                                      | Root component, inspector, toolbar, canvas wiring |
+| [webapp/src/App.tsx](webapp/src/App.tsx)                                      | Root component, toolbar, menus, canvas wiring |
+| [webapp/src/WidgetSheet.tsx](webapp/src/WidgetSheet.tsx)                      | Per-widget settings sheet (Data, Display, Colors, Position tabs) |
+| [webapp/src/PathPicker.tsx](webapp/src/PathPicker.tsx)                        | Searchable SK path field used by every bind  |
 | [webapp/src/WidgetPreview.tsx](webapp/src/WidgetPreview.tsx)                  | Per-kind SVG/CSS renditions of the device    |
 | [webapp/src/api.ts](webapp/src/api.ts)                                        | All HTTP helpers (deviceProxy, push, save, fetchMeta, fetchNotifications) |
 | [webapp/src/skStream.ts](webapp/src/skStream.ts)                              | WS hook for live SK values + notifications poll |
@@ -37,7 +39,10 @@ Two halves in one repo:
    Update schema first, then the preview, then the inspector.
 2. **Canvas mirrors the device 1:1 in pixels.** The grid uses the
    device's `/hello.display.{w,h}` so positions you author here land
-   in the same pixels on the device. Don't introduce CSS that
+   in the same pixels on the device. The view is scaled down to fit
+   the screen (`fitScale`); the wasm canvas is scaled by its CSS size,
+   never by a transformed ancestor, because SDL's WebGL output reads
+   the element's on-screen box. Don't introduce CSS that
    uppercases / restyles content without checking the firmware does
    the same.
 3. **Refuse to push fields/kinds the device doesn't advertise.**
@@ -78,9 +83,10 @@ Mirror the protocol additions on the firmware side. The minimum diff:
 3. **App.tsx — availableKinds**: add to both the fallback list AND the
    `hello.widgets` filter so it shows up in the palette only when the
    device supports it.
-4. **App.tsx — inspector block**: a `{selected.type === 'xxx' && ...}`
-   block under the existing selected-widget panel. Per-kind fields
-   thread through `updateWidget(selected.id, patch)`.
+4. **WidgetSheet.tsx — sheet block**: a `{selected.type === 'xxx' && ...}`
+   block in the tab it belongs to (Data for binds and actions, Display
+   for formatting, Colors, Position). Per-kind fields thread through
+   `updateWidget(selected.id, patch)`; a bind uses `PathPicker`.
 5. **WidgetPreview.tsx**: a `XxxPreview` function and a dispatch
    branch. Use the `zoneColor(w, value, zones, fallback)` helper so
    per-widget `bg_color` / `fg_color` overrides + zone state both
@@ -89,7 +95,7 @@ Mirror the protocol additions on the firmware side. The minimum diff:
 
 For widgets that bind **multiple** SK paths (`bargroup`, `list`):
 
-- `bindsOf(w)` in `App.tsx` enumerates every path the widget needs.
+- `bindsOf(w)` in `widgetBinds.ts` enumerates every path the widget needs.
 - `boundPaths` flows through `useSkValues` so the WS subscribes per
   sub-bind.
 - Both meta-fetch loops (boot restore + `adoptLayout`) iterate
@@ -108,10 +114,8 @@ For widgets that bind **multiple** SK paths (`bargroup`, `list`):
   cannot tell a nested bind from a leaf; the inspector lists the
   affected binds of the selected widget. Lift that once the firmware
   resolves nested fields and advertises it in `/hello`.
-- For path-picker UX, set `bindTarget` to point at the focused field
-  (`{barIdx: i}`) on input focus, route the click in the right-hand
-  panel accordingly. Reset `bindTarget` to `'widget'` whenever
-  `selectedId` changes.
+- Every bind field is its own `PathPicker`, so a sub-bar's picker
+  calls `applyBarBind(id, i, path)` directly.
 
 ## Zones, descriptions, formatting
 

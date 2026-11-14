@@ -249,6 +249,10 @@ export interface WasmCanvasProps {
   panelTheme?: PanelThemeMode
   /** Called with status / error strings so the toolbar can surface them. */
   onStatus?: (msg: string) => void
+  /** Shown size relative to the device, set through the canvas's CSS
+   *  size. A CSS transform on an ancestor instead throws off the SDL
+   *  WebGL output, which reads the element's on-screen box. */
+  cssScale?: number
 }
 
 export function WasmCanvas({
@@ -262,7 +266,8 @@ export function WasmCanvas({
   notifications,
   visible,
   panelTheme = 'auto',
-  onStatus
+  onStatus,
+  cssScale = 1
 }: WasmCanvasProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [modReady, setModReady] = useState<JlpWasmModule | null>(null)
@@ -408,7 +413,10 @@ export function WasmCanvas({
         // instant.
         display: visible ? 'block' : 'none',
         position: 'absolute',
-        inset: 0,
+        top: 0,
+        left: 0,
+        width: `${displayW * cssScale}px`,
+        height: `${displayH * cssScale}px`,
         // Sit BEHIND tile chrome (the chrome bar bumps to z=50 in
         // wasm mode via app.css; outline stays visible via
         // !important on the same selector). pointer-events: none so

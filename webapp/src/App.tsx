@@ -23,7 +23,13 @@ import { CSS } from '@dnd-kit/utilities'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 
+import { setTransform, type PositionStrategy } from 'react-grid-layout/core'
 import { WasmCanvas } from './WasmCanvas'
+import { Popover } from './Popover'
+import { formatPathValue, type PathInfo } from './pathSearch'
+import { UI_ICONS } from './uiIcons'
+import { bindsOf } from './widgetBinds'
+import { WidgetSheet, kindHasData, type SheetTab } from './WidgetSheet'
 import { KIND_INFO, kindMatches } from './widgetIcons'
 import {
   EDITOR_THEMES,
@@ -67,7 +73,7 @@ import {
   fetchPathMeta,
   fetchBrightness,
   fetchScreenshot,
-  fetchSelfPaths,
+  fetchSelfPathInfo,
   isNestedBind,
   loadSavedLayout,
   matchDevice,
@@ -130,17 +136,6 @@ const DRAG_CONFIG = { handle: '.chrome' } as const
 const DEFAULT_DISPLAY_W = 1024
 const DEFAULT_DISPLAY_H = 600
 
-/** Every SK path a widget binds. Top-level for most kinds; the
- *  sub-bars inside a bargroup each contribute their own path. */
-function bindsOf(w: Widget): string[] {
-  const out: string[] = []
-  if ('bind' in w && w.bind) out.push(w.bind)
-  if (w.type === 'bargroup') {
-    for (const b of w.bars) if (b.bind) out.push(b.bind)
-  }
-  return out
-}
-
 /** Returns the first `<prefix>-<n>` not already present in `existing`. */
 function freshId(
   prefix: string,
@@ -153,15 +148,6 @@ function freshId(
   }
   throw new Error('genId exhausted (somehow)')
 }
-
-/** Kinds that drive the panel itself and never take a SignalK bind. */
-const PANEL_LOCAL_KINDS = new Set<WidgetKind>([
-  'voice',
-  'speaker',
-  'mic',
-  'volume',
-  'stream'
-])
 
 function defaultWidget(
   kind: WidgetKind,
@@ -372,57 +358,6 @@ function applyGrid(
   }
 }
 
-/** Free-typing number input.
- *
- *  type="number" silently rejects partial input like "-" or "1."
- *  in many browsers — the field clears, you can't type a negative
- *  without a spinner click, etc. Wrapping the value as text and
- *  parsing-on-commit lets the user type freely (negatives, decimals,
- *  scientific notation), only writing back to state when the input
- *  parses cleanly. */
-function NumberField(props: {
-  value: number
-  onChange: (v: number) => void
-  title?: string
-  className?: string
-  style?: React.CSSProperties
-  min?: number
-}): React.JSX.Element {
-  const [draft, setDraft] = useState<string>(String(props.value))
-  // Track which canonical value the current draft corresponds to so
-  // we can detect external changes (paste, load layout) without
-  // stepping on the user's in-progress edits. When onChange commits
-  // a parsed value, we remember it here; the next render where
-  // props.value matches the lastCommittedRef means "we caused this,
-  // leave draft alone." When props.value doesn't match, it's an
-  // external write and we resync.
-  const lastCommitted = useRef<number>(props.value)
-  useEffect(() => {
-    if (props.value === lastCommitted.current) return
-    lastCommitted.current = props.value
-    setDraft(String(props.value))
-  }, [props.value])
-  return (
-    <input
-      type="text"
-      inputMode="decimal"
-      className={props.className}
-      style={props.style}
-      title={props.title}
-      value={draft}
-      onChange={(e) => {
-        const txt = e.target.value
-        setDraft(txt)
-        const n = Number(txt)
-        if (txt === '' || !Number.isFinite(n)) return
-        if (props.min !== undefined && n < props.min) return
-        lastCommitted.current = n
-        props.onChange(n)
-      }}
-    />
-  )
-}
-
 /** Single tab button wired into @dnd-kit's sortable list.
  *
  *  The whole tab is the drag handle (touch-friendly: the user can
@@ -493,6 +428,62 @@ function SortableTab(props: {
 const DEFAULT_DEVICE_URL = 'http://espos-cockpit.local:8081'
 const DEVICE_URL_KEY = 'hmi-designer.deviceUrl'
 
+// Room under the canvas for its one-line footer.
+const CANVAS_FOOT_H = 36
+// A tile this close to the top (in shown pixels) gets its selection bar
+// below it, so the bar stays on the canvas.
+const CHROME_ROOM = 60
+const RAIL_OPEN_KEY = 'hmi-designer.railOpen'
+
+/** Phone width: the widget list becomes a drawer and closes after a pick. */
+function isPhone(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    window.matchMedia?.('(max-width: 640px)').matches === true
+  )
+}
+
+/** The widget list starts open where there is room for it, unless the
+ *  user chose otherwise before. */
+function loadRailOpen(): boolean {
+  try {
+    const saved = window.localStorage.getItem(RAIL_OPEN_KEY)
+    if (saved === '1') return !isPhone()
+    if (saved === '0') return false
+  } catch {
+    // Storage blocked: fall back to the width.
+  }
+  return typeof window !== 'undefined' && window.innerWidth >= 1400
+}
+
+function saveRailOpen(open: boolean): void {
+  try {
+    window.localStorage.setItem(RAIL_OPEN_KEY, open ? '1' : '0')
+  } catch {
+    // Storage blocked: the choice lasts for this visit only.
+  }
+}
+
+/** The tab the sheet opens on for a widget. */
+function firstTab(w: Widget): SheetTab {
+  return kindHasData(w.type) ? 'data' : 'display'
+}
+
+/** What the device chip calls the connected panel: its mDNS name when a
+ *  scan found it, else the host of its address. */
+function shortDeviceName(
+  url: string,
+  devices: readonly DiscoveredDevice[] | null
+): string {
+  const found = devices ? matchDevice(devices, url) : undefined
+  if (found) return found.name
+  try {
+    return new URL(url).hostname.replace(/\.local$/, '')
+  } catch {
+    return url
+  }
+}
+
 /* ---------- the app ---------- */
 
 export function App(): React.JSX.Element {
@@ -535,8 +526,8 @@ export function App(): React.JSX.Element {
   const [connectedUrl, setConnectedUrl] = useState<string | null>(null)
 
   const [paths, setPaths] = useState<string[]>([])
+  const [pathInfo, setPathInfo] = useState<PathInfo[]>([])
   const knownPathSet = useMemo(() => new Set(paths), [paths])
-  const [pathFilter, setPathFilter] = useState<string>('')
 
   const [screens, setScreens] = useState<Screen[]>([
     { id: 'main', title: 'Main', widgets: [] }
@@ -583,21 +574,6 @@ export function App(): React.JSX.Element {
     id: string
     grid: GLLayout
   } | null>(null)
-  // Which bind field is currently focused. The path picker on the
-  // right routes its click to whichever target is focused:
-  //  - 'widget'    -> top-level widget bind (default, single-bind widgets)
-  //  - {barIdx: N} -> sub-bar bind inside a bargroup
-  // Reset to 'widget' whenever the selection changes.
-  const [bindTarget, setBindTarget] = useState<'widget' | { barIdx: number }>(
-    'widget'
-  )
-  // Reset bindTarget when the user picks a different widget so a
-  // path click after re-selection doesn't accidentally go to the
-  // last-focused sub-bar of the previous selection.
-  useEffect(() => {
-    setBindTarget('widget')
-  }, [selectedId])
-
   // The currently-active screen. Reads use this; writes use setActive().
   // Multi-screen layouts: tab strip at the bottom of canvas switches.
   const screen = screens[activeIdx] ??
@@ -655,12 +631,15 @@ export function App(): React.JSX.Element {
   // once after a failure instead of trusting an empty list.
   const pathsRequest = useRef<Promise<string[]> | null>(null)
   const loadPaths = (): Promise<string[]> => {
-    const req = fetchSelfPaths()
-      .then((p) => {
+    const req = fetchSelfPathInfo()
+      .then((info) => {
+        const p = info.map((i) => i.path)
+        setPathInfo(info)
         setPaths(p)
         return p
       })
       .catch((e: unknown) => {
+        setPathInfo([])
         setPaths([])
         throw e
       })
@@ -903,12 +882,8 @@ export function App(): React.JSX.Element {
   const notifications = useNotifications(wantsNotifications, wantsCleared)
   const selected = screen.widgets.find((w) => w.id === selectedId) ?? null
 
-  const filteredPaths = useMemo(() => {
-    if (!pathFilter) return paths
-    const f = pathFilter.toLowerCase()
-    return paths.filter((p) => p.toLowerCase().includes(f))
-  }, [paths, pathFilter])
-
+  // Set while a drag or resize runs, and for the click that ends it.
+  const draggedRef = useRef(false)
   // Apply RGL geometry back to state ONLY for the single widget the
   // user just dragged or resized. Uses onDragStop / onResizeStop
   // (not onLayoutChange) because the latter fires on mount, remount,
@@ -920,6 +895,10 @@ export function App(): React.JSX.Element {
     _oldItem: GLLayout | null,
     newItem: GLLayout | null
   ): void => {
+    // The click that ends the drag fires after this; let it pass first.
+    setTimeout(() => {
+      draggedRef.current = false
+    }, 0)
     setDragPreview(null)
     if (!newItem) return
     setScreen((prev) => ({
@@ -944,6 +923,7 @@ export function App(): React.JSX.Element {
     _oldItem: GLLayout | null,
     newItem: GLLayout | null
   ): void => {
+    draggedRef.current = true
     if (!newItem) return
     setDragPreview({ id: newItem.i, grid: newItem })
   }
@@ -1056,7 +1036,10 @@ export function App(): React.JSX.Element {
       ...prev,
       widgets: prev.widgets.filter((w) => w.id !== id)
     }))
-    if (selectedId === id) setSelectedId(null)
+    if (selectedId === id) {
+      setSelectedId(null)
+      setSheetOpen(false)
+    }
   }
 
   /* ---- copy/paste clipboard (in-memory, session-scoped) ---- */
@@ -1074,8 +1057,11 @@ export function App(): React.JSX.Element {
   }
 
   const pasteFromClipboard = (): void => {
-    const src = clipboardRef.current
-    if (!src) return
+    if (clipboardRef.current) insertCopy(clipboardRef.current)
+  }
+
+  // Paste and duplicate: a copy of `src` on the active screen, selected.
+  const insertCopy = (src: Widget): void => {
     setScreen((prev) => {
       const kind = src.type
       // Keep the existing id-prefix scheme so the paste fits in.
@@ -1835,266 +1821,453 @@ export function App(): React.JSX.Element {
     )
   }, [hello])
 
+  /* ---- editor chrome: widget list, sheet, menus, canvas fit ---- */
+
+  const [railOpen, setRailOpenState] = useState<boolean>(loadRailOpen)
+  const setRailOpen = (open: boolean): void => {
+    setRailOpenState(open)
+    // A phone opens the list as a drawer for one pick; only a choice
+    // made on a wider screen is worth keeping.
+    if (!isPhone()) saveRailOpen(open)
+  }
+  const [sheetOpen, setSheetOpen] = useState<boolean>(false)
+  // A screen switch, delete or clear drops the selection; the sheet goes
+  // with it, so a later paste does not reopen it unasked.
+  useEffect(() => {
+    if (!selectedId) setSheetOpen(false)
+  }, [selectedId])
+  const [sheetTab, setSheetTab] = useState<SheetTab>('data')
+  const [menuOpen, setMenuOpen] = useState<boolean>(false)
+  const [deviceOpen, setDeviceOpen] = useState<boolean>(false)
+  const [screensOpen, setScreensOpen] = useState<boolean>(false)
+  const menuBtnRef = useRef<HTMLButtonElement | null>(null)
+  const deviceBtnRef = useRef<HTMLButtonElement | null>(null)
+  const screensBtnRef = useRef<HTMLButtonElement | null>(null)
+
+  // The panel is drawn at its own pixel size and scaled down to fit the
+  // space between the widget list and the sheet; positions stay in
+  // device pixels, react-grid-layout is told the scale for its drags.
+  const canvasRef = useRef<HTMLElement | null>(null)
+  const [canvasBox, setCanvasBox] = useState<{ w: number; h: number } | null>(
+    null
+  )
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect
+      if (r) setCanvasBox({ w: r.width, h: r.height })
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const stageH = displayH + (tabOverlay ? tabBelowOffset : 0)
+  const fitScale = canvasBox
+    ? Math.max(
+        0.1,
+        Math.min(
+          1,
+          canvasBox.w / displayW,
+          (canvasBox.h - CANVAS_FOOT_H) / stageH
+        )
+      )
+    : 1
+  // Not createScaledStrategy: its drag start measures from the viewport
+  // instead of the grid, so a tile jumped by the canvas offset on the
+  // first move. Without calcDragPosition the library measures from the
+  // grid and still divides by the scale.
+  const scaledStrategy = useMemo<PositionStrategy>(
+    () => ({
+      type: 'transform',
+      scale: fitScale,
+      calcStyle: (pos) => setTransform(pos)
+    }),
+    [fitScale]
+  )
+
+  const recentBinds = useMemo(
+    () => [...new Set(boundPaths)].sort(),
+    [boundPaths]
+  )
+  const pathInfoByPath = useMemo(
+    () => new Map(pathInfo.map((i) => [i.path, i])),
+    [pathInfo]
+  )
+  const liveValueOf = (bind: string): string | undefined => {
+    if (!bind) return undefined
+    const info = pathInfoByPath.get(bind)
+    const v = skValues.has(bind) ? skValues.get(bind) : info?.value
+    return formatPathValue(v, info?.units)
+  }
+
+  const duplicateWidget = (id: string): void => {
+    const src = screen.widgets.find((w) => w.id === id)
+    if (src) insertCopy(src)
+  }
+
+  const chromeButton = (
+    label: string,
+    icon: React.ReactNode,
+    run: () => void,
+    className?: string
+  ): React.JSX.Element => (
+    <button
+      type="button"
+      className={className}
+      aria-label={label}
+      title={label}
+      // Not a drag: the bar around it is the drag handle.
+      onMouseDown={(e) => e.stopPropagation()}
+      onTouchStart={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation()
+        run()
+      }}
+    >
+      {icon}
+    </button>
+  )
+
+  const previewSwitch = (
+    <div className="segmented" role="group" aria-label="Canvas preview">
+      <button
+        type="button"
+        className={previewMode === 'wasm' ? 'on' : ''}
+        aria-pressed={previewMode === 'wasm'}
+        onClick={() => {
+          setPreviewMode('wasm')
+          // Mirror leaves an <img> overlay at full opacity; if we
+          // don't tear it down on the switch back to WASM, the
+          // last-fetched JPEG sits on top of the LVGL canvas and
+          // pretends to be the live render.
+          if (shotUrl) {
+            URL.revokeObjectURL(shotUrl)
+            setShotUrl(null)
+          }
+        }}
+        title="The panel's own widget code, compiled for the browser. Works without a panel."
+      >
+        Preview
+      </button>
+      <button
+        type="button"
+        className={previewMode === 'mirror' ? 'on' : ''}
+        aria-pressed={previewMode === 'mirror'}
+        onClick={() => {
+          setPreviewMode('mirror')
+          setShotErr(null)
+          setShotOpacity(1)
+        }}
+        title="Show the connected panel's real screen, refreshed continuously"
+      >
+        Mirror
+      </button>
+    </div>
+  )
+
+  const notices: Array<{
+    key: string
+    text: string
+    ok: boolean
+    clear: () => void
+  }> = []
+  if (pushResult)
+    notices.push({
+      key: 'push',
+      ok: pushResult.ok,
+      text: pushResult.ok
+        ? `Pushed ${pushResult.screens} screens, ${pushResult.widgets} widgets`
+        : (pushResult.err ?? 'Push failed'),
+      clear: () => setPushResult(null)
+    })
+  if (pushErr)
+    notices.push({
+      key: 'pushErr',
+      ok: false,
+      text: pushErr,
+      clear: () => setPushErr(null)
+    })
+  if (helloErr)
+    notices.push({
+      key: 'hello',
+      ok: false,
+      text: helloErr,
+      clear: () => setHelloErr(null)
+    })
+  if (brightnessErr)
+    notices.push({
+      key: 'brightness',
+      ok: false,
+      text: brightnessErr,
+      clear: () => setBrightnessErr(null)
+    })
+  if (shotErr)
+    notices.push({
+      key: 'shot',
+      ok: false,
+      text: shotErr,
+      clear: () => setShotErr(null)
+    })
+  if (fileMsg)
+    notices.push({
+      key: 'file',
+      ok: !/fail/i.test(fileMsg),
+      text: fileMsg,
+      clear: () => setFileMsg(null)
+    })
+
+  const deviceState: 'on' | 'err' | 'off' =
+    connectedUrl !== null && hello ? 'on' : helloErr ? 'err' : 'off'
+  const deviceName =
+    connectedUrl !== null ? shortDeviceName(connectedUrl, devices) : 'No panel'
+
+  const closeMenus = (): void => {
+    setMenuOpen(false)
+    setDeviceOpen(false)
+    setScreensOpen(false)
+  }
+
+  const screenPopover = (
+    <div className="pop-section">
+      <div className="pop-group">Screens</div>
+      <div className="pop-screens">
+        {screens.map((s, i) => (
+          <button
+            type="button"
+            key={s.id}
+            className={`pop-item ${i === activeIdx ? 'on' : ''}`}
+            onClick={() => {
+              setActiveIdx(i)
+              setSelectedId(null)
+            }}
+          >
+            {s.title || s.id}
+            <span className="muted">{i + 1}</span>
+          </button>
+        ))}
+        <button type="button" className="pop-item" onClick={addScreen}>
+          {UI_ICONS.plus}
+          Add screen
+        </button>
+      </div>
+      <hr />
+      <label>
+        name of this screen
+        <input
+          value={screen.title}
+          onChange={(e) => renameScreen(activeIdx, e.target.value)}
+        />
+      </label>
+      {(tabModes.length > 1 || tabStrip !== 'fixed') && (
+        <label title="Where the tab strip sits when the layout has more than one screen. Overlay: the pages take the full height, a swipe up from the bottom edge shows the tabs.">
+          tab strip on the panel
+          <select
+            value={tabStrip}
+            onChange={(e) => {
+              const mode = e.target.value as TabStripMode
+              setTabStrip(mode)
+              if (mode === 'fixed' && showTabStrip) {
+                setScreens((prev) => fitStreams(prev, fixedStripPageH))
+              }
+            }}
+          >
+            <option value="fixed">always shown</option>
+            <option value="overlay-bottom">swipe up to show</option>
+          </select>
+        </label>
+      )}
+      {screens.length > 1 && (
+        <button
+          type="button"
+          className="pop-item danger"
+          onClick={() =>
+            setPendingConfirm({
+              message: `Delete screen "${screen.title}"?`,
+              action: 'delete',
+              run: () => removeScreen(screen.id)
+            })
+          }
+        >
+          {UI_ICONS.trash}
+          Delete this screen
+        </button>
+      )}
+    </div>
+  )
+
   return (
     <div
-      className="hmi-app"
+      className={`hmi-app ${railOpen ? 'rail-open' : ''} ${sheetOpen && selected ? 'sheet-open' : ''}`}
       // Click anywhere not absorbed by a tile or interactive control
-      // clears the selection. Tile clicks stopPropagation below; form
-      // controls naturally don't bubble through to here in a way that
-      // matters because they don't change selection state.
-      onClick={() => setSelectedId(null)}
+      // clears the selection and closes the sheet. Tile clicks
+      // stopPropagation below.
+      onClick={() => {
+        setSelectedId(null)
+        setSheetOpen(false)
+      }}
     >
-      <header>
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
-          <strong>HMI Designer</strong>
-          <span className="ver">v{__PLUGIN_VERSION__}</span>
-        </div>
-        <div className="topbar-device">
-          <input
-            type="text"
-            className="topbar-url"
-            value={deviceUrl}
-            onChange={(e) => setDeviceUrl(e.target.value)}
-            placeholder={DEFAULT_DEVICE_URL}
-          />
+      <header className="topbar" onClick={(e) => e.stopPropagation()}>
+        <div className="pop-anchor">
           <button
-            onClick={() => void onScan()}
-            disabled={scanning}
-            title="Find cockpit panels on this network (mDNS)"
+            ref={menuBtnRef}
+            type="button"
+            className="icon-btn"
+            aria-label="Menu"
+            title="Menu"
+            aria-expanded={menuOpen}
+            onClick={() => {
+              const next = !menuOpen
+              closeMenus()
+              setMenuOpen(next)
+            }}
           >
-            {scanning ? 'Scanning…' : 'Scan'}
+            {UI_ICONS.menu}
           </button>
-          {/* A real select, not a datalist: a datalist only offers entries
-              matching the text already in the box, and the box is pre-filled
-              with the last URL, so the other panels never showed. */}
-          {devices && devices.length > 0 && (
-            <select
-              className="topbar-devices"
-              aria-label="Panels found by the last scan"
-              title="Panels found by the last scan. Picking one connects to it."
-              value={matchDevice(devices, deviceUrl)?.url ?? ''}
-              onChange={(e) => onPickDevice(e.target.value)}
-            >
-              <option value="" disabled>
-                {devices.length === 1
-                  ? '1 panel found'
-                  : `${devices.length} panels found`}
-              </option>
-              {devices.map((d) => (
-                <option key={d.url} value={d.url}>
-                  {deviceLabel(d)}
-                </option>
-              ))}
-            </select>
-          )}
-          <button onClick={() => void onConnect()}>Connect</button>
-          <button className="primary" onClick={() => void onPush()}>
-            Push
-          </button>
-          <label
-            className="topbar-toggle"
-            title="Show the device's status strip at top of screen"
+          <Popover
+            open={menuOpen}
+            onClose={() => setMenuOpen(false)}
+            anchorRef={menuBtnRef}
+            label="Menu"
+            className="menu"
           >
-            <input
-              type="checkbox"
-              checked={statusOverlay}
-              onChange={(e) => {
-                const on = e.target.checked
-                setStatusOverlay(on)
-                if (on) {
-                  setScreens((prev) =>
-                    fitStreams(
-                      prev,
-                      displayH - STATUS_OVERLAY_HEIGHT - tabStripSpace
-                    )
-                  )
-                }
+            <div className="pop-group">Layout</div>
+            <button
+              type="button"
+              className="pop-item"
+              onClick={() => {
+                setMenuOpen(false)
+                void onSave()
               }}
-            />
-            status bar
-          </label>
-          {(tabModes.length > 1 || tabStrip !== 'fixed') && (
-            <label
-              className="topbar-toggle"
-              title="Where the tab strip sits when the layout has more than one screen. Overlay: the pages take the full height, a swipe up from the bottom edge shows the tabs."
             >
-              tabs
-              <select
-                value={tabStrip}
-                onChange={(e) => {
-                  const mode = e.target.value as TabStripMode
-                  setTabStrip(mode)
-                  if (mode === 'fixed' && showTabStrip) {
-                    setScreens((prev) => fitStreams(prev, fixedStripPageH))
-                  }
+              {UI_ICONS.save}
+              Save to server
+            </button>
+            <button
+              type="button"
+              className="pop-item"
+              onClick={() => {
+                setMenuOpen(false)
+                onLoad()
+              }}
+            >
+              {UI_ICONS.open}
+              Load from server
+            </button>
+            <button
+              type="button"
+              className="pop-item"
+              onClick={() => {
+                setMenuOpen(false)
+                onExport()
+              }}
+            >
+              {UI_ICONS.download}
+              Export file
+            </button>
+            <button
+              type="button"
+              className="pop-item"
+              onClick={() => {
+                setMenuOpen(false)
+                fileInputRef.current?.click()
+              }}
+            >
+              {UI_ICONS.upload}
+              Import file
+            </button>
+            <hr />
+            <div className="pop-group">Panel</div>
+            <button
+              type="button"
+              className="pop-item"
+              onClick={() => {
+                setMenuOpen(false)
+                setShowNotifModal(true)
+              }}
+            >
+              {UI_ICONS.bell}
+              Alert overlay
+            </button>
+            <button
+              type="button"
+              className="pop-item"
+              onClick={() => {
+                setMenuOpen(false)
+                setShowThemeModal(true)
+              }}
+            >
+              {UI_ICONS.palette}
+              Panel theme and colors
+            </button>
+            {hello?.display?.idle_timeout && (
+              <button
+                type="button"
+                className="pop-item"
+                onClick={() => {
+                  setMenuOpen(false)
+                  setShowDisplayModal(true)
                 }}
               >
-                <option value="fixed">fixed</option>
-                <option value="overlay-bottom">overlay</option>
+                {UI_ICONS.display}
+                Display power save
+              </button>
+            )}
+            <hr />
+            <div className="pop-group">View</div>
+            <div className="pop-row narrow-only">
+              <span>Preview</span>
+              {previewSwitch}
+            </div>
+            <label className="pop-row">
+              <span>Panel colors in the preview</span>
+              <select
+                aria-label="Panel theme preview"
+                title="Which panel theme the canvas shows. As layout follows the panel theme; the others only change the preview."
+                value={previewTheme}
+                onChange={(e) =>
+                  setPreviewTheme(
+                    PANEL_THEME_MODES.find((m) => m === e.target.value) ??
+                      'auto'
+                  )
+                }
+              >
+                <option value="auto">as layout</option>
+                <option value="day">day</option>
+                <option value="dark">dark</option>
+                <option value="night">night</option>
               </select>
             </label>
-          )}
-          {/* Preview backend. WASM (default) renders the layout via
-              the firmware's widget_factory compiled to wasm. Mirror
-              polls the device's /screenshot.jpeg for the real
-              panel pixels. */}
-          <div
-            className="topbar-toggle"
-            role="group"
-            title="Canvas preview backend"
-            style={{ gap: 4 }}
-          >
-            <button
-              onClick={() => {
-                setPreviewMode('wasm')
-                // Mirror leaves an <img> overlay at full opacity; if we
-                // don't tear it down on the switch back to WASM, the
-                // last-fetched JPEG sits on top of the LVGL canvas and
-                // pretends to be the live render.
-                if (shotUrl) {
-                  URL.revokeObjectURL(shotUrl)
-                  setShotUrl(null)
+            <label className="pop-row">
+              <span>Editor theme</span>
+              <select
+                aria-label="Editor theme"
+                title="How the editor looks. The panel's own theme is set under Panel theme and colors."
+                value={editorTheme}
+                onChange={(e) =>
+                  setEditorTheme(parseEditorTheme(e.target.value))
                 }
-              }}
-              className={previewMode === 'wasm' ? 'primary' : ''}
-              title="LVGL + widget_factory compiled to WebAssembly. Pixel-perfect, works offline; ~1.3 MB bundle (lazy-loaded)."
-            >
-              WASM
-            </button>
-            <button
-              onClick={() => {
-                setPreviewMode('mirror')
-                setShotErr(null)
-                setShotOpacity(1)
-              }}
-              className={previewMode === 'mirror' ? 'primary' : ''}
-              title="Continuously poll the device for /screenshot.jpeg so the canvas shows real device pixels (needs a reachable device)"
-            >
-              Mirror
-            </button>
-          </div>
-          {previewMode === 'mirror' && liveMirrorStatus && (
-            <span className="muted" style={{ fontSize: 11 }}>
-              {liveMirrorStatus}
-            </span>
-          )}
-          {previewMode === 'wasm' && wasmStatus && (
-            <span className="muted" style={{ fontSize: 11 }}>
-              {wasmStatus}
-            </span>
-          )}
-          {connectedUrl !== null && brightness !== null && (
-            <label
-              className="topbar-toggle"
-              title={`Panel backlight brightness (${brightness}%) — stored on the device, survives a reboot`}
-              style={{ minWidth: 110 }}
-            >
-              <span>☀ {brightness}%</span>
-              <input
-                type="range"
-                min={5}
-                max={100}
-                step={5}
-                value={brightness}
-                onChange={(e) => setBrightnessState(Number(e.target.value))}
-                // pointerup, not mouseup+touchend: a touch dispatches
-                // touchend AND a compatibility mouseup, which would send two
-                // PUTs -- and two NVS writes -- for one release.
-                onPointerUp={(e) =>
-                  void onBrightnessCommit(Number(e.currentTarget.value))
-                }
-                onKeyUp={(e) =>
-                  void onBrightnessCommit(Number(e.currentTarget.value))
-                }
-              />
+              >
+                {EDITOR_THEMES.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.id === 'auto' ? 'auto' : t.label.toLowerCase()}
+                  </option>
+                ))}
+              </select>
             </label>
-          )}
-          {shotUrl && (
-            <label
-              className="topbar-toggle"
-              title="Overlay opacity"
-              style={{ minWidth: 80 }}
+            <hr />
+            <button
+              type="button"
+              className="pop-item danger"
+              onClick={() => {
+                setMenuOpen(false)
+                onClear()
+              }}
             >
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={shotOpacity}
-                onChange={(e) => setShotOpacity(Number(e.target.value))}
-              />
-            </label>
-          )}
-        </div>
-        <div className="topbar-status">
-          {hello && (
-            <span className="topbar-hello">
-              {hello.firmware ?? 'device'} ·{' '}
-              {hello.display ? `${hello.display.w}×${hello.display.h} · ` : ''}
-              schema {hello.schema}
-              {hello.active_layout_name &&
-                ` · active: ${hello.active_layout_name} (${hello.layout_source ?? '?'})`}
-            </span>
-          )}
-          {helloErr && <span className="err">{helloErr}</span>}
-          {brightnessErr && <span className="err">{brightnessErr}</span>}
-          {pushErr && <span className="err">{pushErr}</span>}
-          {shotErr && <span className="err">{shotErr}</span>}
-          {pushResult && (
-            <span className={pushResult.ok ? 'ok' : 'err'}>
-              {pushResult.ok
-                ? `pushed — ${pushResult.screens} screens, ${pushResult.widgets} widgets`
-                : (pushResult.err ?? 'push failed')}
-            </span>
-          )}
-          {fileMsg && <span className="muted small">{fileMsg}</span>}
-        </div>
-        <div className="topbar-files">
-          <select
-            className="editor-theme"
-            aria-label="Editor theme"
-            title="How the editor looks. The panel's own theme is set under Theme."
-            value={editorTheme}
-            onChange={(e) => setEditorTheme(parseEditorTheme(e.target.value))}
-          >
-            {EDITOR_THEMES.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.id === 'auto' ? 'Editor: Auto' : `Editor: ${t.label}`}
-              </option>
-            ))}
-          </select>
-          <select
-            className="editor-theme"
-            aria-label="Panel theme preview"
-            title="Which panel theme the canvas shows. Layout follows the theme set under Theme; the others only change the preview."
-            value={previewTheme}
-            onChange={(e) =>
-              setPreviewTheme(
-                PANEL_THEME_MODES.find((m) => m === e.target.value) ?? 'auto'
-              )
-            }
-          >
-            <option value="auto">Panel: as layout</option>
-            <option value="day">Panel: Day</option>
-            <option value="dark">Panel: Dark</option>
-            <option value="night">Panel: Night</option>
-          </select>
-          <button onClick={() => void onSave()} title="Save to SK server">
-            Save
-          </button>
-          <button onClick={onLoad} title="Load from SK server">
-            Load
-          </button>
-          <button onClick={onExport} title="Download JSON file">
-            Export
-          </button>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            title="Upload a JSON file"
-          >
-            Import
-          </button>
+              {UI_ICONS.trash}
+              Clear layout…
+            </button>
+            <div className="pop-foot">HMI Designer v{__PLUGIN_VERSION__}</div>
+          </Popover>
           <input
             ref={fileInputRef}
             type="file"
@@ -2107,35 +2280,271 @@ export function App(): React.JSX.Element {
               e.target.value = ''
             }}
           />
-          <button
-            onClick={onClear}
-            title="Reset to a single empty screen"
-            className="danger"
-          >
-            Clear
-          </button>
-          <button
-            onClick={() => setShowNotifModal(true)}
-            title="Configure the device alert overlay"
-          >
-            Notifications
-          </button>
-          <button
-            onClick={() => setShowThemeModal(true)}
-            title="Default screen background and active color for bars/arcs/buttons"
-          >
-            Theme
-          </button>
-          {hello?.display?.idle_timeout && (
-            <button
-              onClick={() => setShowDisplayModal(true)}
-              title="Backlight power-save (idle timeout)"
-            >
-              Display
-            </button>
-          )}
         </div>
+        <button
+          type="button"
+          className="icon-btn rail-toggle"
+          aria-label={
+            railOpen ? 'Collapse the widget list' : 'Expand the widget list'
+          }
+          title={
+            railOpen ? 'Collapse the widget list' : 'Expand the widget list'
+          }
+          aria-pressed={railOpen}
+          onClick={() => setRailOpen(!railOpen)}
+        >
+          {UI_ICONS.rail}
+        </button>
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true" />
+          <strong>HMI Designer</strong>
+        </div>
+        <nav className="screen-tabs" aria-label="Screens">
+          {screens.map((s, i) => (
+            <button
+              type="button"
+              key={s.id}
+              className={i === activeIdx ? 'on' : ''}
+              aria-current={i === activeIdx ? 'page' : undefined}
+              title={
+                i === activeIdx ? 'Screen settings' : `Show ${s.title || s.id}`
+              }
+              onClick={() => {
+                if (i === activeIdx) {
+                  const next = !screensOpen
+                  closeMenus()
+                  setScreensOpen(next)
+                  return
+                }
+                setActiveIdx(i)
+                setSelectedId(null)
+              }}
+            >
+              {s.title || s.id}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="add"
+            aria-label="Add screen"
+            title="Add screen"
+            onClick={addScreen}
+          >
+            {UI_ICONS.plus}
+          </button>
+        </nav>
+        <div className="pop-anchor screens-anchor">
+          <button
+            ref={screensBtnRef}
+            type="button"
+            className="screen-select"
+            aria-expanded={screensOpen}
+            onClick={() => {
+              const next = !screensOpen
+              closeMenus()
+              setScreensOpen(next)
+            }}
+          >
+            <span className="screen-select-title">
+              {screen.title || screen.id}
+            </span>
+            <span className="muted">
+              {activeIdx + 1}/{screens.length}
+            </span>
+            {UI_ICONS.chevron}
+          </button>
+          <Popover
+            open={screensOpen}
+            onClose={() => setScreensOpen(false)}
+            anchorRef={screensBtnRef}
+            label="Screens"
+            className="screens-pop"
+          >
+            {screenPopover}
+          </Popover>
+        </div>
+        <div className="topbar-spacer" />
+        <div className="wide-only">{previewSwitch}</div>
+        <div className="pop-anchor">
+          <button
+            ref={deviceBtnRef}
+            type="button"
+            className={`device-chip ${deviceState}`}
+            aria-expanded={deviceOpen}
+            title="Panel connection"
+            onClick={() => {
+              const next = !deviceOpen
+              closeMenus()
+              setDeviceOpen(next)
+            }}
+          >
+            <span className="dot" aria-hidden="true" />
+            <span className="device-name">{deviceName}</span>
+          </button>
+          <Popover
+            open={deviceOpen}
+            onClose={() => setDeviceOpen(false)}
+            anchorRef={deviceBtnRef}
+            align="right"
+            label="Panel connection"
+            className="device-pop"
+          >
+            <div className="pop-section">
+              <div className="device-head">
+                <span className={`dot ${deviceState}`} aria-hidden="true" />
+                <strong>{deviceName}</strong>
+                <span className="muted">
+                  {deviceState === 'on'
+                    ? 'connected'
+                    : deviceState === 'err'
+                      ? 'not reachable'
+                      : 'not connected'}
+                </span>
+              </div>
+              {hello && (
+                <p className="muted small">
+                  {hello.firmware ?? 'device'}
+                  {hello.display
+                    ? ` · ${hello.display.w}×${hello.display.h}`
+                    : ''}{' '}
+                  · schema {hello.schema}
+                  {hello.active_layout_name &&
+                    ` · showing ${hello.active_layout_name} (${hello.layout_source ?? '?'})`}
+                </p>
+              )}
+              <label>
+                panel address
+                <input
+                  type="text"
+                  className="mono"
+                  value={deviceUrl}
+                  onChange={(e) => setDeviceUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void onConnect()
+                  }}
+                  placeholder={DEFAULT_DEVICE_URL}
+                />
+              </label>
+              {/* A real select, not a datalist: a datalist only offers entries
+                  matching the text already in the box, and the box is pre-filled
+                  with the last URL, so the other panels never showed. */}
+              {devices && devices.length > 0 && (
+                <label>
+                  panels found on this network
+                  <select
+                    title="Picking one connects to it."
+                    value={matchDevice(devices, deviceUrl)?.url ?? ''}
+                    onChange={(e) => onPickDevice(e.target.value)}
+                  >
+                    <option value="" disabled>
+                      {devices.length === 1
+                        ? '1 panel found'
+                        : `${devices.length} panels found`}
+                    </option>
+                    {devices.map((d) => (
+                      <option key={d.url} value={d.url}>
+                        {deviceLabel(d)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <div className="grid-2">
+                <button
+                  type="button"
+                  onClick={() => void onScan()}
+                  disabled={scanning}
+                  title="Find cockpit panels on this network (mDNS)"
+                >
+                  {scanning ? 'Searching…' : 'Search network'}
+                </button>
+                <button type="button" onClick={() => void onConnect()}>
+                  Connect
+                </button>
+              </div>
+              <label
+                className="pop-row"
+                title="Show the device's status strip at the top of the screen"
+              >
+                <span>Status strip at the top</span>
+                <input
+                  type="checkbox"
+                  className="switch"
+                  checked={statusOverlay}
+                  onChange={(e) => {
+                    const on = e.target.checked
+                    setStatusOverlay(on)
+                    if (on) {
+                      setScreens((prev) =>
+                        fitStreams(
+                          prev,
+                          displayH - STATUS_OVERLAY_HEIGHT - tabStripSpace
+                        )
+                      )
+                    }
+                  }}
+                />
+              </label>
+              {connectedUrl !== null && brightness !== null && (
+                <label
+                  className="pop-row"
+                  title="Panel backlight brightness, stored on the device; survives a reboot"
+                >
+                  <span>Brightness {brightness}%</span>
+                  <input
+                    type="range"
+                    min={5}
+                    max={100}
+                    step={5}
+                    value={brightness}
+                    onChange={(e) => setBrightnessState(Number(e.target.value))}
+                    // pointerup, not mouseup+touchend: a touch dispatches
+                    // touchend AND a compatibility mouseup, which would send two
+                    // PUTs -- and two NVS writes -- for one release.
+                    onPointerUp={(e) =>
+                      void onBrightnessCommit(Number(e.currentTarget.value))
+                    }
+                    onKeyUp={(e) =>
+                      void onBrightnessCommit(Number(e.currentTarget.value))
+                    }
+                  />
+                </label>
+              )}
+            </div>
+          </Popover>
+        </div>
+        <button
+          type="button"
+          className="primary push-btn"
+          onClick={() => void onPush()}
+          title="Send this layout to the panel"
+        >
+          {UI_ICONS.push}
+          <span className="push-label">Push</span>
+        </button>
       </header>
+
+      {notices.length > 0 && (
+        <div className="notices" onClick={(e) => e.stopPropagation()}>
+          {notices.map((n) => (
+            <div
+              key={n.key}
+              className={`notice ${n.ok ? 'ok' : 'err'}`}
+              role="status"
+            >
+              <span>{n.text}</span>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Dismiss"
+                onClick={n.clear}
+              >
+                {UI_ICONS.close}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {pendingConfirm && (
         <ConfirmDialog
@@ -2483,10 +2892,23 @@ export function App(): React.JSX.Element {
         </div>
       )}
 
-      <div className="cols">
-        {/* ---- left column: palette + selected props ---- */}
-        <aside className="col left" onClick={(e) => e.stopPropagation()}>
-          <h3>Add widget</h3>
+      <div className="workspace">
+        <aside
+          className="rail"
+          aria-label="Widgets"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="rail-head">
+            <span>Widgets</span>
+            <button
+              type="button"
+              className="icon-btn rail-close"
+              aria-label="Close the widget list"
+              onClick={() => setRailOpen(false)}
+            >
+              {UI_ICONS.close}
+            </button>
+          </div>
           <input
             className="palette-search"
             type="search"
@@ -2500,806 +2922,37 @@ export function App(): React.JSX.Element {
               .filter((k) => kindMatches(k, kindFilter))
               .map((k) => (
                 <button
+                  type="button"
                   key={k}
-                  onClick={() => addWidget(k)}
-                  title={`Add ${KIND_INFO[k].name} (${k})`}
+                  onClick={() => {
+                    addWidget(k)
+                    setSheetTab(kindHasData(k) ? 'data' : 'display')
+                    setSheetOpen(true)
+                    if (isPhone()) setRailOpen(false)
+                  }}
+                  title={`Add ${KIND_INFO[k].name}`}
+                  aria-label={`Add ${KIND_INFO[k].name}`}
                 >
                   {KIND_INFO[k].icon}
-                  {KIND_INFO[k].name}
+                  <span>{KIND_INFO[k].name}</span>
                 </button>
               ))}
           </div>
-
-          <h3>Selected</h3>
-          {!selected && <p className="muted">click a tile to edit</p>}
-          {selected && (
-            <div className="props">
-              <label>
-                id
-                <input value={selected.id} readOnly />
-              </label>
-              {/* stream carries no label at all — the device's /hello field
-                  list doesn't advertise it, the firmware rejects it, and
-                  StreamWidget keeps it type-invalid. The !== check (not the
-                  Set) is what narrows the union for TypeScript. */}
-              {selected.type !== 'stream' && (
-                <label>
-                  label
-                  <input
-                    value={selected.label ?? ''}
-                    onChange={(e) =>
-                      updateWidget(selected.id, { label: e.target.value })
-                    }
-                  />
-                </label>
-              )}
-              {/* The voice widgets are panel-local: the device ignores a
-                  bind on them, so offering the field would only invite a
-                  path that silently does nothing. */}
-              {selected.type !== 'stream' &&
-                !PANEL_LOCAL_KINDS.has(selected.type) && (
-                  <label>
-                    bind (SK path)
-                    <input
-                      value={selected.bind ?? ''}
-                      onFocus={() => setBindTarget('widget')}
-                      onChange={(e) => applyBind(selected.id, e.target.value)}
-                    />
-                  </label>
-                )}
-              {selected.type === 'slider' &&
-                selected.bind === '@brightness' && (
-                  <p className="muted">
-                    panel backlight, 5 to 100 %: the same setting as the toolbar
-                    slider. min, max and display are ignored.
-                  </p>
-                )}
-              {/* Covers bargroup sub-bar binds too, which have their own
-                  inputs further down. */}
-              {(() => {
-                const nested = bindsOf(selected).filter((b) =>
-                  isNestedBind(b, knownPathSet)
-                )
-                return nested.length > 0 ? (
-                  <p className="muted">
-                    {nested.join(', ')}: reaches into an object value, shown in
-                    the preview only. The panel cannot resolve it, and Push will
-                    refuse the layout.
-                  </p>
-                ) : null
-              })()}
-              {selected.type === 'label' && (
-                <label>
-                  show description
-                  <input
-                    type="checkbox"
-                    checked={Boolean(selected.show_description)}
-                    onChange={(e) =>
-                      updateWidget(selected.id, {
-                        show_description: e.target.checked || undefined
-                      })
-                    }
-                  />
-                </label>
-              )}
-              {(selected.type === 'arc' ||
-                selected.type === 'bar' ||
-                selected.type === 'slider') && (
-                <>
-                  <label>
-                    min
-                    <input
-                      type="number"
-                      value={selected.min}
-                      onChange={(e) =>
-                        updateWidget(selected.id, {
-                          min: Number(e.target.value)
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    max
-                    <input
-                      type="number"
-                      value={selected.max}
-                      onChange={(e) =>
-                        updateWidget(selected.id, {
-                          max: Number(e.target.value)
-                        })
-                      }
-                    />
-                  </label>
-                </>
-              )}
-              {selected.type === 'bar' && (
-                <label>
-                  vertical
-                  <input
-                    type="checkbox"
-                    checked={Boolean(selected.vertical)}
-                    onChange={(e) =>
-                      updateWidget(selected.id, {
-                        vertical: e.target.checked || undefined
-                      })
-                    }
-                  />
-                </label>
-              )}
-              {selected.type === 'arc' && (
-                <>
-                  <label>
-                    ticks
-                    <input
-                      type="number"
-                      min={0}
-                      value={selected.ticks ?? 0}
-                      onChange={(e) =>
-                        updateWidget(selected.id, {
-                          ticks: Number(e.target.value) || undefined
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    tick labels
-                    <input
-                      type="checkbox"
-                      checked={Boolean(selected.tick_labels)}
-                      onChange={(e) =>
-                        updateWidget(selected.id, {
-                          tick_labels: e.target.checked || undefined
-                        })
-                      }
-                    />
-                  </label>
-                  <fieldset className="bands">
-                    <legend>bands</legend>
-                    {(selected.bands ?? []).map((b, i) => (
-                      <div className="band-row" key={i}>
-                        <input
-                          type="number"
-                          value={b.from}
-                          title="from"
-                          onChange={(e) => {
-                            const next = [...(selected.bands ?? [])]
-                            next[i] = { ...b, from: Number(e.target.value) }
-                            updateWidget(selected.id, { bands: next })
-                          }}
-                        />
-                        <input
-                          type="number"
-                          value={b.to}
-                          title="to"
-                          onChange={(e) => {
-                            const next = [...(selected.bands ?? [])]
-                            next[i] = { ...b, to: Number(e.target.value) }
-                            updateWidget(selected.id, { bands: next })
-                          }}
-                        />
-                        <input
-                          type="color"
-                          value={b.color}
-                          onChange={(e) => {
-                            const next = [...(selected.bands ?? [])]
-                            next[i] = { ...b, color: e.target.value }
-                            updateWidget(selected.id, { bands: next })
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={() => {
-                            const next = (selected.bands ?? []).filter(
-                              (_, j) => j !== i
-                            )
-                            updateWidget(selected.id, {
-                              bands: next.length ? next : undefined
-                            })
-                          }}
-                          title="Remove band"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() => {
-                        const cur = selected.bands ?? []
-                        // Suggest a band spanning the upper third of
-                        // the range — useful "warn zone" default.
-                        const span = selected.max - selected.min
-                        const next = [
-                          ...cur,
-                          {
-                            from: selected.min + span * 0.7,
-                            to: selected.max,
-                            color: '#d29922'
-                          }
-                        ]
-                        updateWidget(selected.id, { bands: next })
-                      }}
-                    >
-                      + add band
-                    </button>
-                  </fieldset>
-                </>
-              )}
-              {selected.type === 'bargroup' && (
-                <>
-                  <fieldset className="bands">
-                    <legend>bars</legend>
-                    {selected.bars.map((b, i) => (
-                      <div className="band-row" key={i}>
-                        <input
-                          value={b.label}
-                          title="label"
-                          onChange={(e) => {
-                            const next = [...selected.bars]
-                            next[i] = { ...b, label: e.target.value }
-                            updateWidget(selected.id, { bars: next })
-                          }}
-                        />
-                        <input
-                          value={b.bind}
-                          placeholder="signalk.path"
-                          title="bind (click in here, then click a path on the right)"
-                          onFocus={() => setBindTarget({ barIdx: i })}
-                          onChange={(e) =>
-                            applyBarBind(selected.id, i, e.target.value)
-                          }
-                        />
-                        <NumberField
-                          value={b.min}
-                          title="min (negatives + decimals allowed)"
-                          onChange={(n) => {
-                            const next = [...selected.bars]
-                            next[i] = { ...b, min: n }
-                            updateWidget(selected.id, { bars: next })
-                          }}
-                        />
-                        <NumberField
-                          value={b.max}
-                          title="max (negatives + decimals allowed)"
-                          onChange={(n) => {
-                            const next = [...selected.bars]
-                            next[i] = { ...b, max: n }
-                            updateWidget(selected.id, { bars: next })
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={() => {
-                            const next = selected.bars.filter((_, j) => j !== i)
-                            // Keep at least one bar; refuse to drop the last.
-                            if (next.length === 0) return
-                            updateWidget(selected.id, { bars: next })
-                          }}
-                          title="Remove bar"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={(e) => {
-                        const next = [
-                          ...selected.bars,
-                          { label: '', bind: '', min: 0, max: 100 }
-                        ]
-                        updateWidget(selected.id, { bars: next })
-                        // Bring the freshly-added row into view —
-                        // without this the inspector's overflow-y
-                        // hides the new bar at the bottom and the
-                        // click feels like a no-op.
-                        requestAnimationFrame(() => {
-                          const btn =
-                            e.currentTarget as HTMLButtonElement | null
-                          btn?.scrollIntoView({
-                            block: 'nearest',
-                            behavior: 'smooth'
-                          })
-                        })
-                      }}
-                    >
-                      + add bar
-                    </button>
-                  </fieldset>
-                </>
-              )}
-              {selected.type === 'notifications' && (
-                <>
-                  <label>
-                    max rows
-                    <input
-                      type="number"
-                      min={1}
-                      value={selected.max_rows ?? 8}
-                      onChange={(e) =>
-                        updateWidget(selected.id, {
-                          max_rows: Math.max(1, Number(e.target.value))
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    row height
-                    <input
-                      type="number"
-                      min={16}
-                      value={selected.row_height ?? 28}
-                      onChange={(e) =>
-                        updateWidget(selected.id, {
-                          row_height: Math.max(16, Number(e.target.value))
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    row color field
-                    <input
-                      value={selected.row_color_field ?? ''}
-                      placeholder="state"
-                      onChange={(e) =>
-                        updateWidget(selected.id, {
-                          row_color_field: e.target.value || undefined
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="checkbox">
-                    <input
-                      type="checkbox"
-                      checked={selected.include_cleared === true}
-                      onChange={(e) =>
-                        updateWidget(selected.id, {
-                          include_cleared: e.target.checked || undefined
-                        })
-                      }
-                    />
-                    include cleared (normal / nominal)
-                  </label>
-                  <fieldset className="bands">
-                    <legend>columns</legend>
-                    {selected.columns.map((c, i) => (
-                      <div className="band-row" key={i}>
-                        <input
-                          value={c.label}
-                          title="header"
-                          onChange={(e) => {
-                            const next = [...selected.columns]
-                            next[i] = { ...c, label: e.target.value }
-                            updateWidget(selected.id, { columns: next })
-                          }}
-                        />
-                        <input
-                          value={c.field}
-                          title="field (dotted path)"
-                          placeholder="path"
-                          onChange={(e) => {
-                            const next = [...selected.columns]
-                            next[i] = { ...c, field: e.target.value }
-                            updateWidget(selected.id, { columns: next })
-                          }}
-                        />
-                        <input
-                          type="number"
-                          value={c.width ?? 100}
-                          title="width px"
-                          onChange={(e) => {
-                            const next = [...selected.columns]
-                            next[i] = { ...c, width: Number(e.target.value) }
-                            updateWidget(selected.id, { columns: next })
-                          }}
-                        />
-                        <input
-                          value={c.format ?? ''}
-                          title="format"
-                          placeholder="%s"
-                          onChange={(e) => {
-                            const next = [...selected.columns]
-                            next[i] = {
-                              ...c,
-                              format: e.target.value || undefined
-                            }
-                            updateWidget(selected.id, { columns: next })
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={() => {
-                            const next = selected.columns.filter(
-                              (_, j) => j !== i
-                            )
-                            if (next.length === 0) return
-                            updateWidget(selected.id, { columns: next })
-                          }}
-                          title="Remove column"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() => {
-                        const next = [
-                          ...selected.columns,
-                          { label: '', field: '', width: 100 }
-                        ]
-                        updateWidget(selected.id, { columns: next })
-                      }}
-                    >
-                      + add column
-                    </button>
-                  </fieldset>
-                </>
-              )}
-              {selected.type === 'button' && (
-                <>
-                  <label>
-                    press value
-                    <input
-                      value={
-                        selected.press_value === null
-                          ? 'null'
-                          : String(selected.press_value ?? '')
-                      }
-                      placeholder='value, or "null" to raise anchor'
-                      onChange={(e) => {
-                        const t = e.target.value
-                        const n = Number(t)
-                        const v: boolean | number | string | null =
-                          t === 'null'
-                            ? null
-                            : t === 'true'
-                              ? true
-                              : t === 'false'
-                                ? false
-                                : !isNaN(n) && t !== ''
-                                  ? n
-                                  : t
-                        updateWidget(selected.id, { press_value: v })
-                      }}
-                    />
-                  </label>
-                  <label>
-                    release value
-                    <input
-                      value={
-                        selected.release_value === undefined
-                          ? ''
-                          : selected.release_value === null
-                            ? 'null'
-                            : String(selected.release_value)
-                      }
-                      placeholder="(no release PUT)"
-                      onChange={(e) => {
-                        const t = e.target.value
-                        if (t === '') {
-                          updateWidget(selected.id, {
-                            release_value: undefined
-                          })
-                          return
-                        }
-                        const n = Number(t)
-                        const v: boolean | number | string | null =
-                          t === 'null'
-                            ? null
-                            : t === 'true'
-                              ? true
-                              : t === 'false'
-                                ? false
-                                : !isNaN(n)
-                                  ? n
-                                  : t
-                        updateWidget(selected.id, { release_value: v })
-                      }}
-                    />
-                  </label>
-                  <label>
-                    hold ms
-                    <input
-                      type="number"
-                      min={0}
-                      step={100}
-                      value={selected.hold_ms ?? 0}
-                      onChange={(e) => {
-                        const n = Number(e.target.value)
-                        updateWidget(selected.id, {
-                          hold_ms: n > 0 ? n : undefined
-                        })
-                      }}
-                    />
-                  </label>
-                  <div className="muted small">
-                    With release_value set, this is a momentary button (PUT on
-                    press, PUT on release). Without, it's a one-shot action.
-                    hold_ms requires sustained press before any PUT fires —
-                    safety latch for STOP, etc.
-                  </div>
-                </>
-              )}
-              {selected.type === 'stream' && (
-                <>
-                  <label>
-                    host
-                    <input
-                      type="text"
-                      value={selected.host ?? ''}
-                      placeholder="(SignalK server)"
-                      onChange={(e) =>
-                        updateWidget(selected.id, {
-                          host: e.target.value || undefined
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    port
-                    <input
-                      type="number"
-                      min={1}
-                      max={65535}
-                      value={selected.port ?? 5004}
-                      onChange={(e) => {
-                        // max= only marks the input invalid; enforce the
-                        // range here so an out-of-range or fractional port
-                        // never reaches the serialized layout.
-                        const n = Number(e.target.value)
-                        if (!Number.isInteger(n) || n < 1 || n > 65535) return
-                        updateWidget(selected.id, {
-                          port: n !== 5004 ? n : undefined
-                        })
-                      }}
-                    />
-                  </label>
-                  <label>
-                    forward touches
-                    <input
-                      type="checkbox"
-                      checked={selected.touch ?? true}
-                      onChange={(e) =>
-                        updateWidget(selected.id, {
-                          touch: e.target.checked ? undefined : false
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    touch port
-                    <input
-                      type="number"
-                      min={1}
-                      max={65535}
-                      value={selected.touch_port ?? 5005}
-                      onChange={(e) => {
-                        const n = Number(e.target.value)
-                        if (!Number.isInteger(n) || n < 1 || n > 65535) return
-                        updateWidget(selected.id, {
-                          touch_port: n !== 5005 ? n : undefined
-                        })
-                      }}
-                    />
-                  </label>
-                  <div className="muted small">
-                    Live MJPEG remote view captured on the SignalK box
-                    (signalk-esp32-stream); taps on the panel drive the captured
-                    page. Streams only while its screen is visible. Empty host
-                    follows the panel's SignalK server. Renders on the panel
-                    only — the preview shows a placeholder.
-                  </div>
-                </>
-              )}
-              {(selected.type === 'label' ||
-                selected.type === 'value' ||
-                selected.type === 'arc' ||
-                selected.type === 'bar' ||
-                selected.type === 'slider') && (
-                <>
-                  <label>
-                    unit
-                    <input
-                      value={selected.display?.unit ?? ''}
-                      onChange={(e) =>
-                        updateWidget(selected.id, {
-                          display: {
-                            ...(selected.display ?? {}),
-                            unit: e.target.value
-                          }
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    scale
-                    <input
-                      type="number"
-                      step="any"
-                      value={selected.display?.scale ?? 1}
-                      onChange={(e) =>
-                        updateWidget(selected.id, {
-                          display: {
-                            ...(selected.display ?? {}),
-                            scale: Number(e.target.value)
-                          }
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    offset
-                    <input
-                      type="number"
-                      step="any"
-                      value={selected.display?.offset ?? 0}
-                      onChange={(e) =>
-                        updateWidget(selected.id, {
-                          display: {
-                            ...(selected.display ?? {}),
-                            offset: Number(e.target.value)
-                          }
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    decimals
-                    <input
-                      type="number"
-                      value={selected.display?.decimals ?? 1}
-                      onChange={(e) =>
-                        updateWidget(selected.id, {
-                          display: {
-                            ...(selected.display ?? {}),
-                            decimals: Number(e.target.value)
-                          }
-                        })
-                      }
-                    />
-                  </label>
-                </>
-              )}
-              {/* Font size — applies to widgets whose primary text
-                  is configurable (label, value, toggle caption).
-                  Stand-alone so it works even for toggle, which
-                  has no unit/scale/offset/decimals block above. */}
-              {(selected.type === 'label' ||
-                selected.type === 'value' ||
-                selected.type === 'toggle') && (
-                <label>
-                  font size
-                  <select
-                    value={selected.display?.font_size ?? 0}
-                    onChange={(e) => {
-                      const v = Number(e.target.value)
-                      updateWidget(selected.id, {
-                        display: {
-                          ...(selected.display ?? {}),
-                          font_size: v > 0 ? v : undefined
-                        }
-                      })
-                    }}
-                    title="LVGL renders fixed bitmap fonts; firmware snaps to the closest compiled size at or below this value."
-                  >
-                    <option value={0}>auto (default)</option>
-                    <option value={14}>14 px</option>
-                    <option value={16}>16 px</option>
-                    <option value={20}>20 px</option>
-                    <option value={28}>28 px</option>
-                    <option value={36}>36 px</option>
-                  </select>
-                </label>
-              )}
-              {/* ---- Colors (applicable to every widget kind) ---- */}
-              <div className="hr" />
-              <label>
-                bg color
-                <input
-                  type="color"
-                  value={selected.bg_color ?? '#161b22'}
-                  onChange={(e) =>
-                    updateWidget(selected.id, { bg_color: e.target.value })
-                  }
-                />
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() =>
-                    updateWidget(selected.id, { bg_color: undefined })
-                  }
-                  title="Clear bg color override (use theme default)"
-                >
-                  clear
-                </button>
-              </label>
-              <label>
-                fg color
-                <input
-                  type="color"
-                  value={selected.fg_color ?? '#e6edf3'}
-                  onChange={(e) =>
-                    updateWidget(selected.id, { fg_color: e.target.value })
-                  }
-                />
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() =>
-                    updateWidget(selected.id, { fg_color: undefined })
-                  }
-                  title="Clear fg color override (use theme default)"
-                >
-                  clear
-                </button>
-              </label>
-              <div className="muted small">
-                Zone state colors always win when the bound path has a matching
-                zone — these are fallbacks.
-              </div>
-            </div>
-          )}
         </aside>
 
-        {/* ---- center: canvas ---- */}
-        <main className="canvas">
-          <h3>
-            <input
-              className="screen-title"
-              value={screen.title}
-              onChange={(e) => renameScreen(activeIdx, e.target.value)}
-              title="Edit screen title"
-            />
-            <span className="muted">
-              {' '}
-              · screen {activeIdx + 1}/{screens.length}
-            </span>
-          </h3>
-          {/* Deselect on click bubbles up to the app root. */}
+        <main className="canvas" ref={canvasRef}>
           <div
-            className="grid-wrap"
+            className="canvas-stage"
             data-panel-theme={shownTheme}
             style={{
-              width: `${displayW}px`,
-              height: `${displayH}px`,
-              backgroundSize: `${colPxW}px ${gridLinePxH}px`,
+              width: `${displayW * fitScale}px`,
+              height: `${stageH * fitScale}px`,
+              ['--screen-h' as string]: `${displayH * fitScale}px`,
+              ['--grid-size' as string]: `${colPxW * fitScale}px ${gridLinePxH * fitScale}px`,
               // Rows start below the status strip; so must the lines.
-              backgroundPosition: `0 ${statusOverlay ? STATUS_OVERLAY_HEIGHT : 0}px`,
-              // Room for the editable tabs drawn below the canvas.
-              ...(tabOverlay ? { marginBottom: `${tabBelowOffset}px` } : {})
+              ['--grid-pos' as string]: `0 ${(statusOverlay ? STATUS_OVERLAY_HEIGHT : 0) * fitScale}px`
             }}
           >
-            {statusOverlay && (
-              <div
-                className="canvas-overlay"
-                style={{ height: `${STATUS_OVERLAY_HEIGHT}px` }}
-              >
-                <span>host · wifi · sk · n2k · uptime · heap</span>
-              </div>
-            )}
-            {shotUrl && (
-              <img
-                className="canvas-shot"
-                src={shotUrl}
-                alt="device screenshot"
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  width: '100%',
-                  height: '100%',
-                  opacity: shotOpacity,
-                  pointerEvents: 'none',
-                  zIndex: 100
-                }}
-              />
-            )}
             {/* WASM preview: full-canvas LVGL render, sits beneath
                 widget tile chrome so the user can still drag and
                 resize over it. Note SDL captures pointer events on
@@ -3323,170 +2976,228 @@ export function App(): React.JSX.Element {
               visible={previewMode === 'wasm'}
               panelTheme={previewTheme}
               onStatus={setWasmStatus}
+              cssScale={fitScale}
             />
+            {/* Deselect on click bubbles up to the app root. */}
             <div
-              className="canvas-content"
+              className="grid-wrap"
               style={{
-                position: 'absolute',
-                top: statusOverlay ? STATUS_OVERLAY_HEIGHT : 0,
-                left: 0,
-                right: 0,
-                bottom: tabStripSpace
+                width: `${displayW}px`,
+                height: `${displayH}px`,
+                transform: `scale(${fitScale})`
               }}
             >
-              <GridLayout
-                className="grid"
-                layout={grid}
-                width={displayW}
-                // Keep the container at the height maxRows gives it rather
-                // than shrinking to the lowest widget (see gridConfig).
-                autoSize={false}
-                gridConfig={gridConfig}
-                dragConfig={DRAG_CONFIG}
-                compactor={FREEFORM_COMPACTOR}
-                onDrag={onDragOrResize}
-                onResize={onDragOrResize}
-                onDragStop={onDragStop}
-                onResizeStop={onResizeStop}
+              {/* The wasm preview draws the panel's own strip. */}
+              {statusOverlay && previewMode !== 'wasm' && (
+                <div
+                  className="canvas-overlay"
+                  style={{ height: `${STATUS_OVERLAY_HEIGHT}px` }}
+                >
+                  <span>host · wifi · sk · n2k · uptime · heap</span>
+                </div>
+              )}
+              {shotUrl && (
+                <img
+                  className="canvas-shot"
+                  src={shotUrl}
+                  alt="device screenshot"
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    width: '100%',
+                    height: '100%',
+                    opacity: shotOpacity,
+                    pointerEvents: 'none',
+                    zIndex: 100
+                  }}
+                />
+              )}
+              <div
+                className="canvas-content"
+                style={{
+                  position: 'absolute',
+                  top: statusOverlay ? STATUS_OVERLAY_HEIGHT : 0,
+                  left: 0,
+                  right: 0,
+                  bottom: tabStripSpace
+                }}
               >
-                {screen.widgets.map((w) => {
-                  const isSel = selectedId === w.id
-                  return (
-                    <div
-                      key={w.id}
-                      className={`tile ${isSel ? 'sel' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setSelectedId(w.id)
-                      }}
-                    >
-                      {isSel && (
-                        <div className="chrome">
-                          <span>{KIND_INFO[w.type]?.name ?? w.type}</span>
-                          <button
-                            className="x"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              removeWidget(w.id)
-                            }}
+                <GridLayout
+                  className="grid"
+                  layout={grid}
+                  width={displayW}
+                  // Keep the container at the height maxRows gives it rather
+                  // than shrinking to the lowest widget (see gridConfig).
+                  autoSize={false}
+                  gridConfig={gridConfig}
+                  dragConfig={DRAG_CONFIG}
+                  compactor={FREEFORM_COMPACTOR}
+                  onDrag={onDragOrResize}
+                  onResize={onDragOrResize}
+                  onDragStop={onDragStop}
+                  positionStrategy={scaledStrategy}
+                  onResizeStop={onResizeStop}
+                >
+                  {screen.widgets.map((w) => {
+                    const isSel = selectedId === w.id
+                    return (
+                      <div
+                        key={w.id}
+                        className={`tile ${isSel ? 'sel' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          // The click that ends a drag on the bar is no tap.
+                          if (draggedRef.current) return
+                          if (selectedId !== w.id) setSheetTab(firstTab(w))
+                          setSelectedId(w.id)
+                          setSheetOpen(true)
+                        }}
+                      >
+                        {isSel && (
+                          <div
+                            className={`chrome ${w.y < CHROME_ROOM / fitScale ? 'below' : ''}`}
+                            style={{ transform: `scale(${1 / fitScale})` }}
+                            title="Drag to move"
                           >
-                            ×
-                          </button>
-                        </div>
-                      )}
-                      {/* No per-tile preview render. The wasm canvas
+                            <span className="chrome-grip">
+                              {UI_ICONS.grip}
+                              {KIND_INFO[w.type]?.name ?? w.type}
+                            </span>
+                            {chromeButton('Edit', UI_ICONS.edit, () => {
+                              setSheetOpen(true)
+                            })}
+                            {chromeButton('Duplicate', UI_ICONS.copy, () =>
+                              duplicateWidget(w.id)
+                            )}
+                            {chromeButton(
+                              'Delete',
+                              UI_ICONS.trash,
+                              () => removeWidget(w.id),
+                              'danger'
+                            )}
+                          </div>
+                        )}
+                        {/* No per-tile preview render. The wasm canvas
                         and the device-mirror overlay both paint the
                         full widget surface elsewhere; the tile
                         itself is just a click + drag target with
                         chrome on selection. */}
-                    </div>
-                  )
-                })}
-              </GridLayout>
-            </div>
-            {tabOverlay && (
-              <div
-                className="canvas-tabs-ghost"
-                style={{ height: `${tabStripHeight}px` }}
-              >
-                <span>tabs: swipe up</span>
+                      </div>
+                    )
+                  })}
+                </GridLayout>
               </div>
-            )}
-            {showTabStrip && (
-              <div
-                className={`canvas-tabs${tabOverlay ? ' below' : ''}`}
-                style={{
-                  height: `${tabStripHeight}px`,
-                  ...(tabOverlay ? { bottom: `-${tabBelowOffset}px` } : {})
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <DndContext
-                  sensors={sortSensors}
-                  collisionDetection={closestCenter}
-                  onDragEnd={onTabDragEnd}
+              {tabOverlay && (
+                <div
+                  className="canvas-tabs-ghost"
+                  style={{ height: `${tabStripHeight}px` }}
                 >
-                  <SortableContext
-                    items={screens.map((s) => s.id)}
-                    strategy={horizontalListSortingStrategy}
+                  <span>tabs: swipe up</span>
+                </div>
+              )}
+              {showTabStrip && (
+                <div
+                  className={`canvas-tabs${tabOverlay ? ' below' : ''}`}
+                  style={{
+                    height: `${tabStripHeight}px`,
+                    ...(tabOverlay ? { bottom: `-${tabBelowOffset}px` } : {})
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <DndContext
+                    sensors={sortSensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={onTabDragEnd}
                   >
-                    {screens.map((s, i) => (
-                      <SortableTab
-                        key={s.id}
-                        id={s.id}
-                        title={s.title || s.id}
-                        active={i === activeIdx}
-                        showClose={screens.length > 1 && i === activeIdx}
-                        onActivate={() => {
-                          setActiveIdx(i)
-                          setSelectedId(null)
-                        }}
-                        onClose={() =>
-                          setPendingConfirm({
-                            message: `Delete screen "${s.title}"?`,
-                            action: 'delete',
-                            run: () => removeScreen(s.id)
-                          })
-                        }
-                      />
-                    ))}
-                  </SortableContext>
-                </DndContext>
-              </div>
-            )}
+                    <SortableContext
+                      items={screens.map((s) => s.id)}
+                      strategy={horizontalListSortingStrategy}
+                    >
+                      {screens.map((s, i) => (
+                        <SortableTab
+                          key={s.id}
+                          id={s.id}
+                          title={s.title || s.id}
+                          active={i === activeIdx}
+                          showClose={screens.length > 1 && i === activeIdx}
+                          onActivate={() => {
+                            setActiveIdx(i)
+                            setSelectedId(null)
+                          }}
+                          onClose={() =>
+                            setPendingConfirm({
+                              message: `Delete screen "${s.title}"?`,
+                              action: 'delete',
+                              run: () => removeScreen(s.id)
+                            })
+                          }
+                        />
+                      ))}
+                    </SortableContext>
+                  </DndContext>
+                </div>
+              )}
+            </div>
           </div>
-          <div className="canvas-tools" onClick={(e) => e.stopPropagation()}>
-            <button onClick={addScreen}>+ tab</button>
-            {screens.length > 1 && (
-              <span className="muted small">
-                Tab strip shown on device when more than 1 screen exists
-              </span>
+          <div className="canvas-foot" onClick={(e) => e.stopPropagation()}>
+            <span>
+              {displayW}×{displayH}
+              {fitScale < 1 ? ` · shown at ${Math.round(fitScale * 100)}%` : ''}
+            </span>
+            {previewMode === 'mirror' && liveMirrorStatus && (
+              <span>{liveMirrorStatus}</span>
+            )}
+            {previewMode === 'wasm' && wasmStatus && <span>{wasmStatus}</span>}
+            {shotUrl && (
+              <label className="inline" title="Mirror opacity">
+                opacity
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={shotOpacity}
+                  onChange={(e) => setShotOpacity(Number(e.target.value))}
+                />
+              </label>
             )}
           </div>
         </main>
 
-        {/* ---- right: SK paths only ---- */}
-        <aside className="col right" onClick={(e) => e.stopPropagation()}>
-          <h3>SK paths {paths.length > 0 && `(${paths.length})`}</h3>
-          <input
-            placeholder="filter…"
-            value={pathFilter}
-            onChange={(e) => setPathFilter(e.target.value)}
+        <button
+          type="button"
+          className="fab"
+          aria-label="Add widget"
+          onClick={(e) => {
+            e.stopPropagation()
+            setRailOpen(true)
+          }}
+        >
+          {UI_ICONS.plus}
+        </button>
+
+        {selected && sheetOpen && (
+          <WidgetSheet
+            key={selected.id}
+            selected={selected}
+            tab={sheetTab}
+            onTab={setSheetTab}
+            infos={pathInfo}
+            infoByPath={pathInfoByPath}
+            recent={recentBinds}
+            knownPathSet={knownPathSet}
+            liveValue={liveValueOf}
+            zonesOf={(b) => pathZones.get(b)}
+            displayW={displayW}
+            displayH={displayH}
+            updateWidget={updateWidget}
+            applyBind={applyBind}
+            applyBarBind={applyBarBind}
+            onDuplicate={() => duplicateWidget(selected.id)}
+            onDelete={() => removeWidget(selected.id)}
+            onClose={() => setSheetOpen(false)}
           />
-          <ul className="paths">
-            {filteredPaths.map((p) => (
-              <li
-                key={p}
-                onClick={() => {
-                  if (!selected) return
-                  // Route the click to whichever bind input the
-                  // user last focused: widget-level for most kinds,
-                  // a specific sub-bar inside a bargroup.
-                  if (bindTarget !== 'widget' && selected.type === 'bargroup') {
-                    if (selected.bars[bindTarget.barIdx]) {
-                      applyBarBind(selected.id, bindTarget.barIdx, p)
-                      return
-                    }
-                  }
-                  applyBind(selected.id, p)
-                }}
-                title={
-                  bindTarget !== 'widget' && selected?.type === 'bargroup'
-                    ? `click to bind to sub-bar #${bindTarget.barIdx + 1}`
-                    : 'click to bind to selected widget'
-                }
-              >
-                {p}
-              </li>
-            ))}
-            {paths.length === 0 && (
-              <li className="muted">
-                no SK data — connect this designer via SK server
-              </li>
-            )}
-          </ul>
-        </aside>
+        )}
       </div>
     </div>
   )

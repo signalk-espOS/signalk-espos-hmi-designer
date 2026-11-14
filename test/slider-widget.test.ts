@@ -13,6 +13,14 @@ const APP = readFileSync(
   fileURLToPath(new URL('../webapp/src/App.tsx', import.meta.url)),
   'utf8'
 )
+const BINDS = readFileSync(
+  fileURLToPath(new URL('../webapp/src/widgetBinds.ts', import.meta.url)),
+  'utf8'
+)
+const SHEET = readFileSync(
+  fileURLToPath(new URL('../webapp/src/WidgetSheet.tsx', import.meta.url)),
+  'utf8'
+)
 const SCHEMA = readFileSync(
   fileURLToPath(new URL('../webapp/src/schema.ts', import.meta.url)),
   'utf8'
@@ -45,10 +53,7 @@ describe('slider widget kind', () => {
   })
 
   it('is NOT in PANEL_LOCAL_KINDS -- it takes a real SignalK bind', () => {
-    const set = APP.slice(
-      APP.indexOf('PANEL_LOCAL_KINDS'),
-      APP.indexOf('function defaultWidget')
-    )
+    const set = BINDS.slice(BINDS.indexOf('PANEL_LOCAL_KINDS'))
     expect(set).not.toContain("'slider'")
   })
 
@@ -69,7 +74,7 @@ describe('slider widget kind', () => {
     // Both blocks gate on `selected.type === 'slider'` (min/max alongside
     // arc/bar, display alongside label/value/arc/bar) -- not asserting
     // exact source formatting, just that both call sites exist.
-    const occurrences = APP.split("selected.type === 'slider'").length - 1
+    const occurrences = SHEET.split("selected.type === 'slider'").length - 1
     expect(occurrences).toBeGreaterThanOrEqual(2)
   })
 })
