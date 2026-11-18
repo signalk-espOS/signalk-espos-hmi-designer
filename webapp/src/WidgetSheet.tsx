@@ -3,7 +3,7 @@ import { colorForZoneState, isNestedBind, type MetaZone } from './api'
 import { NumberField } from './NumberField'
 import { PathPicker } from './PathPicker'
 import type { PathInfo } from './pathSearch'
-import type { Widget, WidgetKind } from './schema'
+import type { FontSizeOption, Widget, WidgetKind } from './schema'
 import { UI_ICONS } from './uiIcons'
 import { bindsOf, PANEL_LOCAL_KINDS } from './widgetBinds'
 import { KIND_INFO } from './widgetIcons'
@@ -37,6 +37,8 @@ export function WidgetSheet(props: {
   infos: readonly PathInfo[]
   infoByPath: ReadonlyMap<string, PathInfo>
   displayW: number
+  /** The choices of the font size list, from the device's /hello. */
+  fontSizes: readonly FontSizeOption[]
   /** Height of a page: the display minus the status and tab strips. */
   pageH: number
   recent: readonly string[]
@@ -711,11 +713,11 @@ export function WidgetSheet(props: {
                   title="LVGL renders fixed bitmap fonts; firmware snaps to the closest compiled size at or below this value."
                 >
                   <option value={0}>auto (default)</option>
-                  <option value={14}>14 px</option>
-                  <option value={16}>16 px</option>
-                  <option value={20}>20 px</option>
-                  <option value={28}>28 px</option>
-                  <option value={36}>36 px</option>
+                  {props.fontSizes.map((o) => (
+                    <option key={o.px} value={o.px}>
+                      {o.px} px{o.digits ? ' (numbers)' : ''}
+                    </option>
+                  ))}
                 </select>
               </label>
             )}

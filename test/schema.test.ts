@@ -8,6 +8,8 @@ import {
   mergeTheme,
   parseFirmwareVersion,
   tabStripModes,
+  DEFAULT_FONT_SIZES,
+  fontSizeOptions,
   type AnchorWidget,
   type ButtonWidget,
   type LabelWidget,
@@ -343,5 +345,63 @@ describe('panel themes', () => {
     expect(resolvePanelTheme({ mode: 'night' }, 'day')).toBe('day')
     expect(resolvePanelTheme({ mode: 'auto', day_base: 'dark' })).toBe('dark')
     expect(resolvePanelTheme(undefined)).toBe('day')
+  })
+})
+
+describe('font size options', () => {
+  const withFonts = (font_sizes?: unknown, digit_font_sizes?: unknown) =>
+    ({
+      schema: 1,
+      widgets: {},
+      display: { w: 320, h: 240, font_sizes, digit_font_sizes }
+    }) as HelloResponse
+  const px = (o: { px: number }[]) => o.map((x) => x.px)
+
+  it('offers the default sizes to firmware that lists none', () => {
+    expect(px(fontSizeOptions(undefined, 'label'))).toEqual([
+      ...DEFAULT_FONT_SIZES
+    ])
+    expect(px(fontSizeOptions(withFonts(), 'value'))).toEqual([
+      ...DEFAULT_FONT_SIZES
+    ])
+  })
+
+  it('offers the sizes the device lists, sorted and once each', () => {
+    expect(
+      px(fontSizeOptions(withFonts([48, 14, 40, 14, 20]), 'label'))
+    ).toEqual([14, 20, 40, 48])
+  })
+
+  it('adds the digit-only sizes to a value tile only', () => {
+    const h = withFonts([14, 48], [60, 140])
+    expect(fontSizeOptions(h, 'value')).toEqual([
+      { px: 14, digits: false },
+      { px: 48, digits: false },
+      { px: 60, digits: true },
+      { px: 140, digits: true }
+    ])
+    expect(px(fontSizeOptions(h, 'label'))).toEqual([14, 48])
+    expect(px(fontSizeOptions(h, 'toggle'))).toEqual([14, 48])
+  })
+
+  it('ignores lists that are not lists of positive whole numbers', () => {
+    expect(px(fontSizeOptions(withFonts('48'), 'label'))).toEqual([
+      ...DEFAULT_FONT_SIZES
+    ])
+    expect(
+      px(fontSizeOptions(withFonts([14, -2, 0, 20.5, '36', 48]), 'label'))
+    ).toEqual([14, 48])
+    expect(px(fontSizeOptions(withFonts([14], { 0: 60 }), 'value'))).toEqual([
+      14
+    ])
+  })
+
+  it("keeps the widget's own size listed when the device lacks it", () => {
+    expect(px(fontSizeOptions(undefined, 'value', 72))).toEqual([
+      14, 16, 20, 28, 36, 72
+    ])
+    expect(px(fontSizeOptions(undefined, 'value', 28))).toEqual([
+      14, 16, 20, 28, 36
+    ])
   })
 })
