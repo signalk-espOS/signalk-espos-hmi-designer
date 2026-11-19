@@ -61,6 +61,7 @@ import {
   panelThemeModes,
   resolvePanelTheme,
   tabStripModes,
+  fontSizeOptions,
   type PanelThemeMode,
   type TabStripMode
 } from './schema'
@@ -3204,6 +3205,11 @@ export function App(): React.JSX.Element {
             liveValue={liveValueOf}
             zonesOf={(b) => pathZones.get(b)}
             displayW={displayW}
+            fontSizes={fontSizeOptions(
+              hello,
+              selected.type,
+              'display' in selected ? selected.display?.font_size : undefined
+            )}
             pageH={
               displayH -
               (statusOverlay ? STATUS_OVERLAY_HEIGHT : 0) -

@@ -30,9 +30,10 @@ export interface DisplayConfig {
   decimals?: number
   /** Desired pixel font size for the widget's primary text (label
    *  caption, value readout). LVGL can't synthesize fonts at
-   *  runtime, so the firmware snaps to the closest compiled
-   *  Montserrat size at or below this value (14, 16, 20, 28, 36).
-   *  Omit to use the widget's default. */
+   *  runtime, so the firmware snaps to the closest compiled size at
+   *  or below this value: those in `/hello.display.font_sizes`, or
+   *  14, 16, 20, 28 and 36 on firmware that lists none. Omit to use
+   *  the widget's default. */
   font_size?: number
 }
 
@@ -497,6 +498,13 @@ export interface HelloResponse {
     themes?: string[]
     /** The theme on screen now. */
     theme?: string
+    /** The `display.font_size` values with a compiled font of their
+     *  own, smallest first. Absent on firmware that has only
+     *  `DEFAULT_FONT_SIZES`. */
+    font_sizes?: number[]
+    /** Larger sizes whose fonts hold digits only, for a widget whose
+     *  text is a number (`value`). */
+    digit_font_sizes?: number[]
   }
   widgets: Record<string, { fields: string[] }>
   active_layout_name?: string
@@ -596,6 +604,60 @@ export function tabStripModes(
     modes.push('overlay-bottom')
   }
   return modes
+}
+
+/** The font sizes of firmware that does not list its own. */
+export const DEFAULT_FONT_SIZES: readonly number[] = [14, 16, 20, 28, 36]
+
+/** One choice in the widget sheet's font size list. */
+export interface FontSizeOption {
+  px: number
+  /** A font with digits only. */
+  digits: boolean
+}
+
+/** Positive whole numbers from a /hello list, ascending, each once.
+ *  Anything else yields an empty list. */
+function sizeList(v: unknown): number[] {
+  // Checked as an array: a string would pass a length test.
+  if (!Array.isArray(v)) return []
+  const ok = v.filter(
+    (n): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0
+  )
+  return [...new Set(ok)].sort((a, b) => a - b)
+}
+
+/** The font sizes to offer for a widget of `kind`: the device's
+ *  `/hello.display.font_sizes`, or `DEFAULT_FONT_SIZES` when it lists
+ *  none, plus its `digit_font_sizes` for a `value`. `current`, the
+ *  widget's own font_size, stays in the list even when the device lacks
+ *  it, so a layout made for another panel shows what it asks for. */
+export function fontSizeOptions(
+  hello: HelloResponse | null | undefined,
+  kind: WidgetKind,
+  current?: number
+): FontSizeOption[] {
+  const listed = sizeList(hello?.display?.font_sizes)
+  const text = listed.length > 0 ? listed : [...DEFAULT_FONT_SIZES]
+  const digits =
+    kind === 'value'
+      ? sizeList(hello?.display?.digit_font_sizes).filter(
+          (px) => !text.includes(px)
+        )
+      : []
+  const options: FontSizeOption[] = [
+    ...text.map((px) => ({ px, digits: false })),
+    ...digits.map((px) => ({ px, digits: true }))
+  ]
+  if (
+    typeof current === 'number' &&
+    current > 0 &&
+    !options.some((o) => o.px === current)
+  ) {
+    options.push({ px: current, digits: false })
+    options.sort((a, b) => a.px - b.px)
+  }
+  return options
 }
 
 /** Narrowing helper — verifies an unknown value matches HelloResponse. */

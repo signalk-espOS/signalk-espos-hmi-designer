@@ -55,6 +55,8 @@ Per-kind extras live in [webapp/src/schema.ts](webapp/src/schema.ts).
 
 The designer refuses to push widget kinds the device's `/hello` doesn't list — newer designer with older firmware still works, with the unsupported kinds greyed out in the palette.
 
+The font size list offers the sizes the device names in `/hello.display.font_sizes`, and for a `value` also the digit-only sizes in `display.digit_font_sizes`. Firmware that names none gets 14, 16, 20, 28 and 36 px.
+
 ### Control buttons
 
 To make a widget _do_ something on tap, use a **`button`** — a `label`
