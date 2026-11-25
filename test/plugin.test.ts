@@ -408,6 +408,53 @@ describe('POST /device-proxy', () => {
   })
 })
 
+describe('POST /device-proxy through signalk-espos-manager', () => {
+  const g = globalThis as { __signalk_esposManager?: unknown }
+  afterEach(() => {
+    delete g.__signalk_esposManager
+  })
+
+  it('sends a known panel through the broker, which adds the key', async () => {
+    const panel = await upstream({ status: 200, body: Buffer.from('{}') })
+    cleanups.push(panel.close)
+    const calls: Array<{ url: string; method?: string }> = []
+    g.__signalk_esposManager = {
+      version: 1,
+      request: async (
+        url: string,
+        init: { method?: string; headers?: Record<string, string> }
+      ) => {
+        calls.push({ url, method: init.method })
+        return fetch(url, {
+          ...init,
+          headers: { ...init.headers, Authorization: 'Bearer k' }
+        })
+      }
+    }
+    mounted = await mount(dataDir)
+    const res = await proxy(mounted.base, {
+      url: `${panel.url}/layout`,
+      method: 'POST',
+      body: { schema: 1 }
+    })
+    expect(res.status).toBe(200)
+    expect(calls).toEqual([{ url: `${panel.url}/layout`, method: 'POST' }])
+    expect(panel.seen[0]?.headers.authorization).toBe('Bearer k')
+    expect(panel.seen[0]?.body).toBe('{"schema":1}')
+  })
+
+  it('proxies directly when the broker does not know the host', async () => {
+    const panel = await upstream({ status: 200, body: Buffer.from('{}') })
+    cleanups.push(panel.close)
+    g.__signalk_esposManager = { version: 1, request: async () => undefined }
+    mounted = await mount(dataDir)
+    const res = await proxy(mounted.base, { url: `${panel.url}/hello` })
+    expect(res.status).toBe(200)
+    expect(panel.seen).toHaveLength(1)
+    expect(panel.seen[0]?.headers.authorization).toBeUndefined()
+  })
+})
+
 describe('GET /devices', () => {
   type Handler = (req: Request, res: Response) => void | Promise<void>
 
@@ -506,6 +553,17 @@ describe('GET /devices', () => {
           txt: { fw: '1.2.3' }
         }
       ]
+    })
+  })
+
+  it('leaves port 80 out of the url', async () => {
+    const { sink, browser } = browse()
+    browser.emitUp(
+      svc({ name: 'espos-1a2b', host: 'espos-1a2b.local.', port: 80 })
+    )
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(sink.payload()).toEqual({
+      devices: [{ url: 'http://espos-1a2b.local', name: 'espos-1a2b', txt: {} }]
     })
   })
 

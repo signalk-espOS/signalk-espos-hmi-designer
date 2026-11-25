@@ -16,6 +16,30 @@ interface DiscoveredDevice {
 const PLUGIN_ID = 'signalk-hmi-designer'
 const LAYOUT_FILE = 'layout.json'
 
+/**
+ * signalk-espos-manager's device broker (its src/broker/), present while
+ * that plugin runs. Looked up per request: it comes and goes with the
+ * manager, and a server without it proxies directly as before.
+ */
+interface EsposDeviceBroker {
+  readonly version: number
+  request(
+    url: string,
+    init?: {
+      method?: string
+      headers?: Record<string, string>
+      body?: string
+      signal?: AbortSignal
+    }
+  ): Promise<globalThis.Response | undefined>
+}
+
+function esposBroker(): EsposDeviceBroker | undefined {
+  const b = (globalThis as { __signalk_esposManager?: unknown })
+    .__signalk_esposManager as EsposDeviceBroker | undefined
+  return b?.version === 1 && typeof b.request === 'function' ? b : undefined
+}
+
 interface ProxyBody {
   url?: unknown
   body?: unknown
@@ -87,7 +111,9 @@ const plugin = (app: ServerAPI): Plugin => {
           const host: string | undefined =
             svc.host ?? svc.addresses?.find((a: string) => a.includes('.'))
           if (!host || !svc.port) return
-          const url = `http://${host.replace(/\.$/, '')}:${svc.port}`
+          const name = host.replace(/\.$/, '')
+          const url =
+            svc.port === 80 ? `http://${name}` : `http://${name}:${svc.port}`
           found.set(url, {
             url,
             name: svc.name ?? host,
@@ -148,10 +174,11 @@ const plugin = (app: ServerAPI): Plugin => {
       })
 
       // Forward arbitrary GET/POST to a device on the local network.
-      // The webapp can't talk to a device's :8081 directly because the
-      // browser sees that as a cross-origin call. Sending it via the
-      // SK server origin keeps everything same-origin and inherits SK
-      // auth.
+      // The webapp can't talk to a device directly because the browser
+      // sees that as a cross-origin call. Sending it via the SK server
+      // origin keeps everything same-origin and inherits SK auth. A panel
+      // that signalk-espos-manager knows is reached through the manager,
+      // which adds the panel's API key; the key never reaches this plugin.
       router.post('/device-proxy', async (req: Request, res: Response) => {
         const b = (req.body ?? {}) as ProxyBody
         if (typeof b.url !== 'string') {
@@ -215,11 +242,30 @@ const plugin = (app: ServerAPI): Plugin => {
           // than abort here first.
           const t = setTimeout(() => controller.abort(), 30_000)
           init.signal = controller.signal
-          const upstream = await fetch(url, init)
-          clearTimeout(t)
+          let upstream: globalThis.Response | undefined
+          const broker = esposBroker()
+          if (broker) {
+            try {
+              upstream = await broker.request(url, {
+                method,
+                headers,
+                body: typeof init.body === 'string' ? init.body : undefined,
+                signal: controller.signal
+              })
+            } catch (err) {
+              // The panel itself not answering is the answer; a manager
+              // failing for any other reason must not cut the designer off.
+              if (controller.signal.aborted) throw err
+              const msg = err instanceof Error ? err.message : String(err)
+              app.debug(`espos-manager could not send ${url}: ${msg}`)
+            }
+          }
+          upstream ??= await fetch(url, init)
           // Read as a Buffer so binary responses (BMP screenshots etc)
-          // pass through unmangled.
+          // pass through unmangled. The timeout covers the body too: a
+          // screenshot can stall after its headers.
           const body = Buffer.from(await upstream.arrayBuffer())
+          clearTimeout(t)
           res.status(upstream.status)
           const ct = upstream.headers.get('content-type')
           if (ct) res.setHeader('content-type', ct)

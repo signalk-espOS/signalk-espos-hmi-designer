@@ -80,7 +80,18 @@ button with no live position can drop at the current fix.)
 
 ## Device contract
 
-The designer assumes the device exposes (default port 8081 on the reference firmware):
+The designer assumes the device exposes these on the port its
+`_signalk-player._tcp` record advertises. The reference firmware serves them
+from its web server on port 80, so `http://<panel>` is the whole device URL;
+older firmware used port 8081, and a remembered `:8081` URL moves to port 80
+by itself once the panel answers there.
+
+A panel with an API key (`httpd.api_key`) answers `/layout` and
+`/screenshot` only with that key. With
+[signalk-espos-manager](https://github.com/signalk-espOS/signalk-espos-manager)
+running on the same server and holding the key (its fleet key, or one set
+for the panel), the designer sends its requests through the manager, which
+adds the key; there is nothing to enter in the designer.
 
 | Method | Endpoint      | Purpose                                                                          |
 | ------ | ------------- | -------------------------------------------------------------------------------- |
