@@ -86,15 +86,14 @@ describe('fetchServerDisplays', () => {
     vi.unstubAllGlobals()
   })
 
-  const answer = (status: number): void => {
+  const answer = (
+    status: number,
+    body = JSON.stringify({ displays: [] })
+  ): void => {
     vi.stubGlobal('location', { origin })
     vi.stubGlobal(
       'fetch',
-      vi.fn(() =>
-        Promise.resolve(
-          new Response(JSON.stringify({ displays: [] }), { status })
-        )
-      )
+      vi.fn(() => Promise.resolve(new Response(body, { status })))
     )
   }
 
@@ -108,6 +107,15 @@ describe('fetchServerDisplays', () => {
   it('reports a server error instead of finding nothing', async () => {
     answer(500)
     await expect(fetchServerDisplays()).rejects.toThrow('500')
+  })
+
+  it('reports an answer that is no display list', async () => {
+    for (const body of ['<html>', '{}', '{"displays":{}}']) {
+      answer(200, body)
+      await expect(fetchServerDisplays()).rejects.toThrow('no display list')
+    }
+    answer(200)
+    await expect(fetchServerDisplays()).resolves.toEqual([])
   })
 })
 

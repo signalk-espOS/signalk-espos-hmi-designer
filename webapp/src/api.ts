@@ -714,6 +714,14 @@ export async function fetchServerDisplays(): Promise<DiscoveredDevice[]> {
   if (r.status === 401 || r.status === 403 || r.status === 404) return []
   if (!r.ok) throw new Error(`browser display discovery failed: ${r.status}`)
   const body: unknown = await r.json().catch(() => null)
+  // An answer that is no display list is a failure too, not "none here".
+  if (
+    typeof body !== 'object' ||
+    body === null ||
+    !Array.isArray((body as { displays?: unknown }).displays)
+  ) {
+    throw new Error('browser display discovery returned no display list')
+  }
   return serverDisplayTargets(body, origin)
 }
 
