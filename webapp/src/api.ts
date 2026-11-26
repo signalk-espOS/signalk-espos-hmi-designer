@@ -39,7 +39,71 @@ function panelRefused(status: number, body: string): boolean {
   }
 }
 
+/** Where signalk-espos-hmi lists its browser displays on this server. */
+export const HMI_DISPLAYS = '/plugins/signalk-espos-hmi/displays'
+
+function currentOrigin(): string | undefined {
+  return typeof location === 'undefined' ? undefined : location.origin
+}
+
+/**
+ * A browser display of signalk-espos-hmi on the server the designer runs
+ * on. It is reached directly rather than through /device-proxy: pushing a
+ * layout there needs the user's own admin login, which the proxy, a
+ * request from the server to itself, does not carry.
+ */
+export function isServerDisplay(
+  url: string,
+  origin: string | undefined = currentOrigin()
+): boolean {
+  if (origin === undefined) return false
+  try {
+    const u = new URL(url)
+    return u.origin === origin && u.pathname.startsWith(`${HMI_DISPLAYS}/`)
+  } catch {
+    return false
+  }
+}
+
+async function serverDisplayRequest<T>(req: ProxyRequest): Promise<T> {
+  const method = req.method ?? 'GET'
+  const init: RequestInit = {
+    method,
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' }
+  }
+  if (req.body !== undefined) {
+    init.headers = {
+      Accept: 'application/json',
+      'Content-Type': 'application/json'
+    }
+    init.body = JSON.stringify(req.body)
+  }
+  const r = await fetch(req.url, init)
+  const text = await r.text()
+  if (r.status === 401 || r.status === 403) {
+    throw new Error(
+      `the server refused this (${r.status}): sign in to Signal K as an ` +
+        'admin to push to a browser display'
+    )
+  }
+  if (!r.ok) {
+    let msg = text
+    try {
+      const parsed = JSON.parse(text) as { error?: unknown; err?: unknown }
+      if (typeof parsed.error === 'string') msg = parsed.error
+      else if (typeof parsed.err === 'string') msg = parsed.err
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(`browser display ${r.status}: ${msg}`)
+  }
+  if (!text) return undefined as T
+  return JSON.parse(text) as T
+}
+
 async function deviceProxy<T>(req: ProxyRequest): Promise<T> {
+  if (isServerDisplay(req.url)) return serverDisplayRequest<T>(req)
   const r = await fetch(`${PLUGIN_BASE}/device-proxy`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -80,6 +144,8 @@ export function otherPanelUrl(url: string): string | undefined {
   } catch {
     return undefined
   }
+  // A path is a browser display on a server, not a panel's layout API.
+  if (u.pathname !== '/') return undefined
   if (u.port === LEGACY_LAYOUT_PORT) u.port = ''
   else if (u.port === '') u.port = LEGACY_LAYOUT_PORT
   else return undefined
@@ -144,6 +210,9 @@ export interface PushResult {
  * URL.createObjectURL for use in <img src=...>.
  */
 export async function fetchScreenshot(deviceUrl: string): Promise<Blob> {
+  if (isServerDisplay(deviceUrl)) {
+    throw new Error('a browser display has no screenshot')
+  }
   const r = await fetch(`${PLUGIN_BASE}/device-proxy`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -541,8 +610,44 @@ export async function fetchDevices(): Promise<DiscoveredDevice[]> {
   return (body as { devices: DiscoveredDevice[] }).devices
 }
 
-/** Reduce a device URL to what identifies the panel: scheme, host and
- *  port. Host names are case-insensitive, and neither a trailing slash
+/**
+ * The browser displays signalk-espos-hmi serves on this server, as
+ * targets. Empty when the plugin is not installed or this user may not
+ * read it: the mDNS scan still stands on its own.
+ */
+export async function fetchServerDisplays(): Promise<DiscoveredDevice[]> {
+  const origin = currentOrigin()
+  if (origin === undefined) return []
+  const r = await fetch(HMI_DISPLAYS, { credentials: 'same-origin' })
+  if (!r.ok) return []
+  const body: unknown = await r.json().catch(() => null)
+  return serverDisplayTargets(body, origin)
+}
+
+/** The `GET /displays` answer as picker entries. */
+export function serverDisplayTargets(
+  body: unknown,
+  origin: string
+): DiscoveredDevice[] {
+  if (typeof body !== 'object' || body === null) return []
+  const list = (body as { displays?: unknown }).displays
+  if (!Array.isArray(list)) return []
+  const out: DiscoveredDevice[] = []
+  for (const d of list) {
+    if (typeof d !== 'object' || d === null) continue
+    const { id, name } = d as { id?: unknown; name?: unknown }
+    if (typeof id !== 'string' || id === '') continue
+    out.push({
+      url: `${origin}${HMI_DISPLAYS}/${encodeURIComponent(id)}`,
+      name: `${typeof name === 'string' && name ? name : id} (browser display)`,
+      txt: {}
+    })
+  }
+  return out
+}
+
+/** Reduce a device URL to what identifies the panel: scheme, host,
+ *  port and, for a browser display, its path. Host names are case-insensitive, and neither a trailing slash
  *  nor the trailing dot of an mDNS FQDN makes it a different panel. An
  *  address that does not parse comes back trimmed but otherwise as typed,
  *  so a half-typed URL simply matches nothing. */
@@ -551,7 +656,9 @@ export function normalizeDeviceUrl(url: string): string {
   try {
     const u = new URL(trimmed)
     const host = u.hostname.toLowerCase().replace(/\.$/, '')
-    return `${u.protocol}//${host}${u.port ? `:${u.port}` : ''}`
+    // Browser displays share their server's host and differ by path.
+    const path = u.pathname.replace(/\/+$/, '')
+    return `${u.protocol}//${host}${u.port ? `:${u.port}` : ''}${path}`
   } catch {
     return trimmed
   }
@@ -611,6 +718,8 @@ function configBase(deviceUrl: string): string {
 export async function fetchBrightness(
   deviceUrl: string
 ): Promise<number | null> {
+  // A browser display's brightness is its monitor's, not the layout's.
+  if (isServerDisplay(deviceUrl)) return null
   const v = await deviceProxy<unknown>({
     url: `${configBase(deviceUrl)}/api/v1/config`,
     method: 'GET'

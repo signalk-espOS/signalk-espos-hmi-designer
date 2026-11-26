@@ -70,6 +70,7 @@ import {
   deriveDisplayDefaults,
   deviceLabel,
   fetchDevices,
+  fetchServerDisplays,
   connectPanel,
   fetchPathMeta,
   fetchBrightness,
@@ -1265,14 +1266,26 @@ export function App(): React.JSX.Element {
     setScanning(true)
     setHelloErr(null)
     try {
-      const found = sortDevices(await fetchDevices())
+      // The mDNS scan and this server's browser displays are separate
+      // sources: one failing must not hide what the other found.
+      const [panels, displays] = await Promise.allSettled([
+        fetchDevices(),
+        fetchServerDisplays()
+      ])
+      if (panels.status === 'rejected' && displays.status === 'rejected') {
+        throw panels.reason
+      }
+      const found = sortDevices([
+        ...(panels.status === 'fulfilled' ? panels.value : []),
+        ...(displays.status === 'fulfilled' ? displays.value : [])
+      ])
       setDevices(found)
       // One panel on the LAN is the common case — select it outright
       // rather than making the user pick from a list of one.
       if (found.length === 1 && found[0]) setDeviceUrl(found[0].url)
       if (found.length === 0) {
         setHelloErr(
-          'No devices announced _signalk-player._tcp. Check the panel is ' +
+          'No panels or browser displays found. Check the panel is ' +
             'on the same network, or type its address.'
         )
       }
