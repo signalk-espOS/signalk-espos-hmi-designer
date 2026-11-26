@@ -17,6 +17,28 @@ interface ProxyRequest {
   body?: unknown
 }
 
+/**
+ * What a panel's 401 means here: it has an API key, and the designer sends
+ * one only through signalk-espos-manager, which holds the key.
+ */
+export const NEEDS_KEY_MESSAGE =
+  'the panel has an API key and refused this request: run ' +
+  "signalk-espos-manager on this server with the panel's key (its fleet " +
+  'key, or one set for this panel) and the designer uses it automatically'
+
+/**
+ * A 401 the panel sent, as opposed to one from the Signal K server about
+ * the designer's own login: espOS names it in the body.
+ */
+function panelRefused(status: number, body: string): boolean {
+  if (status !== 401) return false
+  try {
+    return (JSON.parse(body) as { error?: unknown }).error === 'unauthorized'
+  } catch {
+    return false
+  }
+}
+
 async function deviceProxy<T>(req: ProxyRequest): Promise<T> {
   const r = await fetch(`${PLUGIN_BASE}/device-proxy`, {
     method: 'POST',
@@ -24,6 +46,7 @@ async function deviceProxy<T>(req: ProxyRequest): Promise<T> {
     body: JSON.stringify(req)
   })
   const text = await r.text()
+  if (panelRefused(r.status, text)) throw new Error(NEEDS_KEY_MESSAGE)
   if (!r.ok) {
     let msg = text
     try {
@@ -36,6 +59,63 @@ async function deviceProxy<T>(req: ProxyRequest): Promise<T> {
   }
   if (!text) return undefined as T
   return JSON.parse(text) as T
+}
+
+/**
+ * The port of the layout API's own server, which panels ran before they
+ * served it from their web server on port 80.
+ */
+const LEGACY_LAYOUT_PORT = '8081'
+
+/**
+ * The other address a panel can have, for a `url` that did not answer: the
+ * web server port for the old layout API port (current firmware), the old
+ * port for a URL without one (firmware before the move). Undefined for any
+ * other port, which the user chose.
+ */
+export function otherPanelUrl(url: string): string | undefined {
+  let u: URL
+  try {
+    u = new URL(url)
+  } catch {
+    return undefined
+  }
+  if (u.port === LEGACY_LAYOUT_PORT) u.port = ''
+  else if (u.port === '') u.port = LEGACY_LAYOUT_PORT
+  else return undefined
+  return u.toString().replace(/\/$/, '')
+}
+
+/** The proxy gave up waiting: the panel is down, and so is the other port. */
+function timedOut(e: unknown): boolean {
+  return e instanceof Error && /\babort/i.test(e.message)
+}
+
+/** The proxy reached nothing, as opposed to a panel that answered. */
+function unreachable(e: unknown): boolean {
+  return e instanceof Error && e.message.startsWith('device proxy 502')
+}
+
+/**
+ * /hello from `url`, or, when that does not answer, from the same panel's
+ * other port (otherPanelUrl): panels moved the layout API from :8081 to
+ * port 80. `url` in the result is the one that answered. When both fail,
+ * the error of a panel that answered wins over one that is not there.
+ */
+export async function connectPanel(
+  url: string
+): Promise<{ hello: HelloResponse; url: string }> {
+  try {
+    return { hello: await fetchHello(url), url }
+  } catch (first) {
+    const other = otherPanelUrl(url)
+    if (other === undefined || timedOut(first)) throw first
+    try {
+      return { hello: await fetchHello(other), url: other }
+    } catch (second) {
+      throw unreachable(first) && !unreachable(second) ? second : first
+    }
+  }
 }
 
 /** Capability fetch from a target device. */
@@ -73,6 +153,9 @@ export async function fetchScreenshot(deviceUrl: string): Promise<Blob> {
     })
   })
   if (!r.ok) {
+    if (panelRefused(r.status, await r.clone().text())) {
+      throw new Error(NEEDS_KEY_MESSAGE)
+    }
     let msg = `screenshot HTTP ${r.status}`
     try {
       const j = (await r.json()) as { error?: unknown }
@@ -512,9 +595,9 @@ export function sortDevices(
 // `cockpit` namespace, is stored in NVS and is re-applied on every boot, so a
 // value set here survives a reboot without the designer doing anything.
 //
-// It is served by the espOS web server on port 80, NOT by the layout API the
-// rest of this file talks to (:8081), so the port is replaced rather than the
-// device URL reused as-is.
+// It is served by the espOS web server on port 80. Current panels serve the
+// layout API there too, older ones on :8081, so the port is replaced rather
+// than the device URL reused as-is.
 
 /** espOS config base (port 80) for a device given its layout API URL. */
 function configBase(deviceUrl: string): string {

@@ -70,7 +70,7 @@ import {
   deriveDisplayDefaults,
   deviceLabel,
   fetchDevices,
-  fetchHello,
+  connectPanel,
   fetchPathMeta,
   fetchBrightness,
   fetchScreenshot,
@@ -426,7 +426,7 @@ function SortableTab(props: {
  *  `espos-<last 4 hex of MAC>`, so there is no single correct default —
  *  this is only a shape to edit, and the last working URL is remembered
  *  below. */
-const DEFAULT_DEVICE_URL = 'http://espos-cockpit.local:8081'
+const DEFAULT_DEVICE_URL = 'http://espos-cockpit.local'
 const DEVICE_URL_KEY = 'hmi-designer.deviceUrl'
 
 // Room under the canvas for its one-line footer.
@@ -1300,14 +1300,20 @@ export function App(): React.JSX.Element {
     // Results only count while this is still the newest attempt.
     const current = (): boolean => gen === connectGen.current
     try {
-      const h = await fetchHello(target)
+      // A remembered :8081 is a panel from before the layout API moved to
+      // port 80; connectPanel finds it there and the box follows, unless
+      // the user has typed something else since.
+      const { hello: h, url: answered } = await connectPanel(target)
       if (!current()) return
       setHello(h)
-      setConnectedUrl(target)
+      setConnectedUrl(answered)
+      if (answered !== target) {
+        setDeviceUrl((typed) => (typed === target ? answered : typed))
+      }
       // Only remember a URL that actually answered, so a typo does not
       // become the sticky default for every future session.
       try {
-        window.localStorage.setItem(DEVICE_URL_KEY, target)
+        window.localStorage.setItem(DEVICE_URL_KEY, answered)
       } catch {
         // non-fatal: the session still works, it just will not be remembered
       }
@@ -1315,7 +1321,7 @@ export function App(): React.JSX.Element {
       // slider and means "this device does not report one"; a failed request
       // is an error and must say so, or a reachable panel looks unsupported.
       try {
-        const b = await fetchBrightness(target)
+        const b = await fetchBrightness(answered)
         if (current()) setBrightnessState(b)
       } catch (e) {
         if (current()) {
