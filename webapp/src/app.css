@@ -511,6 +511,7 @@ button.danger,
 }
 
 .screen-tabs {
+  position: relative;
   display: flex;
   gap: 2px;
   min-width: 0;
@@ -536,6 +537,11 @@ button.danger,
   color: var(--fg);
   font-weight: 600;
 }
+.screen-tabs button.tab-hidden {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+}
 .screen-tabs button.add {
   width: var(--ctl);
   padding: 0;
@@ -544,6 +550,24 @@ button.danger,
 }
 .screens-anchor {
   display: none;
+}
+.screen-more {
+  display: none;
+  font-size: 18px;
+  line-height: 1;
+}
+/* Wide toolbar with more screens than room: the leading tabs plus a "⋯"
+   menu with all of them. */
+.topbar.tabs-overflow .screens-anchor {
+  display: block;
+}
+@media (min-width: 1101px) {
+  .topbar.tabs-overflow .screen-more {
+    display: inline;
+  }
+  .topbar.tabs-overflow .screen-select-title {
+    display: none;
+  }
 }
 .screen-select {
   display: flex;

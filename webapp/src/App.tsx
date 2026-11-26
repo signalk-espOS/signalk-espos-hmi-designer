@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 import GridLayout, {
   getCompactor,
   type LayoutItem as GLLayout
@@ -26,6 +32,7 @@ import 'react-resizable/css/styles.css'
 import { setTransform, type PositionStrategy } from 'react-grid-layout/core'
 import { WasmCanvas } from './WasmCanvas'
 import { Popover } from './Popover'
+import { fitTabs } from './fitTabs'
 import { formatPathValue, type PathInfo } from './pathSearch'
 import { UI_ICONS } from './uiIcons'
 import { bindsOf } from './widgetBinds'
@@ -1864,6 +1871,58 @@ export function App(): React.JSX.Element {
   const deviceBtnRef = useRef<HTMLButtonElement | null>(null)
   const screensBtnRef = useRef<HTMLButtonElement | null>(null)
   const activeTabRef = useRef<HTMLButtonElement | null>(null)
+  const navRef = useRef<HTMLElement | null>(null)
+  const spacerRef = useRef<HTMLDivElement | null>(null)
+  const addTabRef = useRef<HTMLButtonElement | null>(null)
+  const tabEls = useRef<(HTMLButtonElement | null)[]>([])
+  // Tabs that fit the toolbar; the rest move behind the screens menu, so a
+  // layout with many screens stays one readable row on a tablet.
+  const [tabFit, setTabFit] = useState<{
+    shown: number[]
+    overflow: boolean
+  } | null>(null)
+  useLayoutEffect(() => {
+    const nav = navRef.current
+    const spacer = spacerRef.current
+    const bar = nav?.parentElement
+    if (!nav || !spacer || !bar) return
+    const measure = (): void => {
+      // Narrow layouts hide the tabs and show the menu instead.
+      if (nav.offsetParent === null) return
+      const widths = screens.map((_, i) => tabEls.current[i]?.offsetWidth ?? 0)
+      const more = screensBtnRef.current
+      const moreShown = more !== null && more.offsetParent !== null
+      // Room the tabs, the add button and the menu share: what the nav and
+      // the spacer hold now, plus the menu while it is on screen.
+      const avail =
+        nav.clientWidth +
+        spacer.clientWidth +
+        (moreShown ? more.offsetWidth + 6 : 0) -
+        8
+      const next = fitTabs(widths, avail, {
+        add: addTabRef.current?.offsetWidth ?? 40,
+        more: moreShown ? more.offsetWidth + 6 : 110,
+        gap: 2,
+        active: activeIdx
+      })
+      setTabFit((prev) =>
+        prev &&
+        prev.overflow === next.overflow &&
+        prev.shown.join() === next.shown.join()
+          ? prev
+          : next
+      )
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    // The spacer absorbs width changes of the other toolbar controls (a
+    // longer device name), which leave the bar itself the same size.
+    ro.observe(bar)
+    ro.observe(spacer)
+    ro.observe(nav)
+    return () => ro.disconnect()
+  }, [screens, activeIdx])
+  const tabsOverflow = tabFit?.overflow === true
 
   // The panel is drawn at its own pixel size and scaled down to fit the
   // space between the widget list and the sheet; positions stay in
@@ -2133,7 +2192,10 @@ export function App(): React.JSX.Element {
         setSheetOpen(false)
       }}
     >
-      <header className="topbar" onClick={(e) => e.stopPropagation()}>
+      <header
+        className={`topbar${tabsOverflow ? ' tabs-overflow' : ''}`}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="pop-anchor">
           <button
             ref={menuBtnRef}
@@ -2326,32 +2388,45 @@ export function App(): React.JSX.Element {
           <span className="brand-mark" aria-hidden="true" />
           <strong>HMI Designer</strong>
         </div>
-        <nav className="screen-tabs" aria-label="Screens">
-          {screens.map((s, i) => (
-            <button
-              type="button"
-              key={s.id}
-              ref={i === activeIdx ? activeTabRef : undefined}
-              className={i === activeIdx ? 'on' : ''}
-              aria-current={i === activeIdx ? 'page' : undefined}
-              title={
-                i === activeIdx ? 'Screen settings' : `Show ${s.title || s.id}`
-              }
-              onClick={() => {
-                if (i === activeIdx) {
-                  const next = !screensOpen
-                  closeMenus()
-                  setScreensOpen(next)
-                  return
+        <nav className="screen-tabs" aria-label="Screens" ref={navRef}>
+          {screens.map((s, i) => {
+            // Hidden tabs stay in the DOM, out of the flow, so they can
+            // still be measured when the toolbar grows.
+            const hidden = tabsOverflow && tabFit?.shown.includes(i) !== true
+            return (
+              <button
+                type="button"
+                key={s.id}
+                ref={(el) => {
+                  tabEls.current[i] = el
+                  if (i === activeIdx) activeTabRef.current = el
+                }}
+                className={`${i === activeIdx ? 'on' : ''}${hidden ? ' tab-hidden' : ''}`}
+                aria-hidden={hidden || undefined}
+                tabIndex={hidden ? -1 : undefined}
+                aria-current={i === activeIdx ? 'page' : undefined}
+                title={
+                  i === activeIdx
+                    ? 'Screen settings'
+                    : `Show ${s.title || s.id}`
                 }
-                setActiveIdx(i)
-                setSelectedId(null)
-              }}
-            >
-              {s.title || s.id}
-            </button>
-          ))}
+                onClick={() => {
+                  if (i === activeIdx) {
+                    const next = !screensOpen
+                    closeMenus()
+                    setScreensOpen(next)
+                    return
+                  }
+                  setActiveIdx(i)
+                  setSelectedId(null)
+                }}
+              >
+                {s.title || s.id}
+              </button>
+            )
+          })}
           <button
+            ref={addTabRef}
             type="button"
             className="add"
             aria-label="Add screen"
@@ -2366,6 +2441,7 @@ export function App(): React.JSX.Element {
             ref={screensBtnRef}
             type="button"
             className="screen-select"
+            aria-label="Screens"
             aria-expanded={screensOpen}
             onClick={() => {
               const next = !screensOpen
@@ -2373,6 +2449,9 @@ export function App(): React.JSX.Element {
               setScreensOpen(next)
             }}
           >
+            <span className="screen-more" aria-hidden="true">
+              ⋯
+            </span>
             <span className="screen-select-title">
               {screen.title || screen.id}
             </span>
@@ -2392,7 +2471,7 @@ export function App(): React.JSX.Element {
             {screenPopover}
           </Popover>
         </div>
-        <div className="topbar-spacer" />
+        <div className="topbar-spacer" ref={spacerRef} />
         <div className="wide-only">{previewSwitch}</div>
         <div className="pop-anchor">
           <button
