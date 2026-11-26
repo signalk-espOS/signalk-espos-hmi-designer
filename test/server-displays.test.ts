@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   HMI_DISPLAYS,
+  fetchDevices,
   fetchServerDisplays,
+  requestRemoteAccess,
   isServerDisplay,
   matchDevice,
   normalizeDeviceUrl,
@@ -105,5 +107,53 @@ describe('fetchServerDisplays', () => {
   it('reports a server error instead of finding nothing', async () => {
     answer(500)
     await expect(fetchServerDisplays()).rejects.toThrow('500')
+  })
+})
+
+describe('fetchDevices', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('passes on the servers that have not let the designer in', async () => {
+    const locked = ['http://boat2.local:3000']
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ devices: [], locked: [...locked, 7] }))
+        )
+      )
+    )
+    await expect(fetchDevices()).resolves.toEqual({ devices: [], locked })
+  })
+})
+
+describe('requestRemoteAccess', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const answer = (status: number, body: unknown): void => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(new Response(JSON.stringify(body), { status }))
+      )
+    )
+  }
+
+  it("relays the plugin's instruction", async () => {
+    answer(200, { message: 'approve it there' })
+    await expect(requestRemoteAccess('http://boat2.local:3000')).resolves.toBe(
+      'approve it there'
+    )
+  })
+
+  it('asks a non-admin to sign in', async () => {
+    answer(401, {})
+    await expect(requestRemoteAccess('http://boat2.local:3000')).resolves.toBe(
+      'sign in to Signal K as an admin to connect to boat2.local:3000'
+    )
   })
 })

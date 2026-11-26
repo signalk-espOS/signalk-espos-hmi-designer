@@ -46,6 +46,15 @@ function currentOrigin(): string | undefined {
   return typeof location === 'undefined' ? undefined : location.origin
 }
 
+/** A browser display of signalk-espos-hmi, on any server. */
+export function isBrowserDisplay(url: string): boolean {
+  try {
+    return new URL(url).pathname.startsWith(`${HMI_DISPLAYS}/`)
+  } catch {
+    return false
+  }
+}
+
 /**
  * A browser display of signalk-espos-hmi on the server the designer runs
  * on. It is reached directly rather than through /device-proxy: pushing a
@@ -210,7 +219,7 @@ export interface PushResult {
  * URL.createObjectURL for use in <img src=...>.
  */
 export async function fetchScreenshot(deviceUrl: string): Promise<Blob> {
-  if (isServerDisplay(deviceUrl)) {
+  if (isBrowserDisplay(deviceUrl)) {
     throw new Error('a browser display has no screenshot')
   }
   const r = await fetch(`${PLUGIN_BASE}/device-proxy`, {
@@ -596,7 +605,7 @@ export interface DiscoveredDevice {
 /** Ask the plugin to browse `_signalk-player._tcp`. The browse runs on
  *  the SignalK server (which is on the boat LAN), not in the browser,
  *  which cannot do mDNS. Takes ~1.5s while responders answer. */
-export async function fetchDevices(): Promise<DiscoveredDevice[]> {
+export async function fetchDevices(): Promise<Discovery> {
   const r = await fetch(`${PLUGIN_BASE}/devices`)
   if (!r.ok) throw new Error(`device discovery failed: ${r.status}`)
   const body: unknown = await r.json()
@@ -607,7 +616,58 @@ export async function fetchDevices(): Promise<DiscoveredDevice[]> {
   ) {
     throw new Error('device discovery returned an unexpected shape')
   }
-  return (body as { devices: DiscoveredDevice[] }).devices
+  const { devices, locked } = body as {
+    devices: DiscoveredDevice[]
+    locked?: unknown
+  }
+  return {
+    devices,
+    locked: Array.isArray(locked)
+      ? locked.filter((a): a is string => typeof a === 'string')
+      : []
+  }
+}
+
+/**
+ * What a network scan found: panels and other servers' browser displays,
+ * and the servers that run signalk-espos-hmi but have not let the
+ * designer in yet.
+ */
+export interface Discovery {
+  devices: DiscoveredDevice[]
+  locked: string[]
+}
+
+/**
+ * Have the plugin ask `server` to let the designer push there. Answers
+ * with what the user does next, also when this fails.
+ */
+export async function requestRemoteAccess(server: string): Promise<string> {
+  let host = server
+  try {
+    host = new URL(server).host
+  } catch {
+    /* keep it as given */
+  }
+  try {
+    const r = await fetch(`${PLUGIN_BASE}/remote-access`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ server })
+    })
+    if (r.status === 401 || r.status === 403) {
+      return `sign in to Signal K as an admin to connect to ${host}`
+    }
+    const body = (await r.json().catch(() => ({}))) as {
+      message?: unknown
+      error?: unknown
+    }
+    if (typeof body.message === 'string') return body.message
+    if (typeof body.error === 'string') return body.error
+    return `${host} took no access request (${r.status})`
+  } catch (e) {
+    return `could not ask ${host} for access: ${e instanceof Error ? e.message : String(e)}`
+  }
 }
 
 /**
@@ -722,7 +782,7 @@ export async function fetchBrightness(
   deviceUrl: string
 ): Promise<number | null> {
   // A browser display's brightness is its monitor's, not the layout's.
-  if (isServerDisplay(deviceUrl)) return null
+  if (isBrowserDisplay(deviceUrl)) return null
   const v = await deviceProxy<unknown>({
     url: `${configBase(deviceUrl)}/api/v1/config`,
     method: 'GET'

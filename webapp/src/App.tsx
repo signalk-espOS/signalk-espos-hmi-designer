@@ -77,6 +77,7 @@ import {
   deriveDisplayDefaults,
   deviceLabel,
   fetchDevices,
+  requestRemoteAccess,
   fetchServerDisplays,
   connectPanel,
   fetchPathMeta,
@@ -1283,14 +1284,18 @@ export function App(): React.JSX.Element {
         throw panels.reason
       }
       const found = sortDevices([
-        ...(panels.status === 'fulfilled' ? panels.value : []),
+        ...(panels.status === 'fulfilled' ? panels.value.devices : []),
         ...(displays.status === 'fulfilled' ? displays.value : [])
       ])
+      const locked = panels.status === 'fulfilled' ? panels.value.locked : []
+      const access = await Promise.all(locked.map(requestRemoteAccess))
       setDevices(found)
       // One panel on the LAN is the common case — select it outright
       // rather than making the user pick from a list of one.
       if (found.length === 1 && found[0]) setDeviceUrl(found[0].url)
-      if (found.length === 0) {
+      if (access.length > 0) {
+        setHelloErr(access.join('; '))
+      } else if (found.length === 0) {
         setHelloErr(
           'No panels or browser displays found. Check the panel is ' +
             'on the same network, or type its address.'

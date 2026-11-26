@@ -1,0 +1,259 @@
+import { promises as fs } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { hostname, networkInterfaces } from 'node:os'
+import path from 'node:path'
+
+/** Where signalk-espos-hmi lists its browser displays. */
+export const HMI_DISPLAYS = '/plugins/signalk-espos-hmi/displays'
+const HMI_PREFIX = '/plugins/signalk-espos-hmi/'
+const ACCESS_FILE = 'remote-access.json'
+const CHECK_TIMEOUT_MS = 2000
+
+export interface RemoteDisplay {
+  url: string
+  name: string
+  txt: Record<string, string>
+}
+
+interface ServerAccess {
+  token?: string
+  /** The pending access request's status URL, relative to the server. */
+  href?: string
+}
+
+interface AccessFile {
+  clientId: string
+  servers: Record<string, ServerAccess>
+}
+
+type Fetch = typeof fetch
+
+/** A server's origin as URL parsing spells it (host in lower case). */
+export function originOf(server: string): string {
+  return new URL(server).origin
+}
+
+/** The message the designer shows while a server has not approved it. */
+export function approveMessage(origin: string): string {
+  return (
+    `approve the HMI Designer on ${new URL(origin).host} ` +
+    '(Security → Access Requests there), then try again'
+  )
+}
+
+/** The message for a token that works but carries less than admin. */
+export function adminMessage(origin: string): string {
+  return (
+    `${new URL(origin).host} let the HMI Designer in without admin ` +
+    'rights: give it admin under Security → Devices there'
+  )
+}
+
+/** Whether `url` is a signalk-espos-hmi route; undefined when it is not. */
+export function hmiOrigin(url: string): string | undefined {
+  try {
+    const u = new URL(url)
+    return u.pathname.startsWith(HMI_PREFIX) ? u.origin : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The addresses this host answers on, to leave this server out of a scan. */
+export function localAddresses(): Set<string> {
+  const out = new Set<string>(['127.0.0.1', '::1'])
+  for (const list of Object.values(networkInterfaces())) {
+    for (const a of list ?? []) out.add(a.address)
+  }
+  return out
+}
+
+/**
+ * The designer's access to signalk-espos-hmi on other Signal K servers.
+ * Pushing a layout there needs admin rights on that server, which the
+ * signed-in user here does not carry. The designer asks for them with a
+ * Signal K access request, the way devices do, and keeps the token here:
+ * it never reaches the browser.
+ */
+export class RemoteAccess {
+  private loading: Promise<AccessFile> | undefined
+  private writing: Promise<void> = Promise.resolve()
+
+  constructor(
+    private readonly dataDir: () => string,
+    private readonly fetchFn: Fetch = (...a) => fetch(...a)
+  ) {}
+
+  // One shared load: parallel callers on a first scan must not each make
+  // a state with its own client id.
+  private load(): Promise<AccessFile> {
+    this.loading ??= this.read()
+    return this.loading
+  }
+
+  private async read(): Promise<AccessFile> {
+    try {
+      const raw = JSON.parse(
+        await fs.readFile(path.join(this.dataDir(), ACCESS_FILE), 'utf-8')
+      ) as Partial<AccessFile>
+      if (typeof raw.clientId === 'string' && raw.servers) {
+        return { clientId: raw.clientId, servers: raw.servers }
+      }
+    } catch {
+      /* first use, or a broken file: start over */
+    }
+    return { clientId: randomUUID(), servers: {} }
+  }
+
+  private async save(): Promise<void> {
+    const state = await this.load()
+    // A failed write must not stop every later one.
+    this.writing = this.writing
+      .catch(() => undefined)
+      .then(async () => {
+        const dir = this.dataDir()
+        await fs.mkdir(dir, { recursive: true })
+        const file = path.join(dir, ACCESS_FILE)
+        // The file holds admin tokens for other servers.
+        await fs.writeFile(`${file}.tmp`, JSON.stringify(state), {
+          mode: 0o600
+        })
+        await fs.rename(`${file}.tmp`, file)
+      })
+    return this.writing
+  }
+
+  private async timed(url: string, init: RequestInit = {}): Promise<Response> {
+    return this.fetchFn(url, {
+      ...init,
+      signal: AbortSignal.timeout(CHECK_TIMEOUT_MS)
+    })
+  }
+
+  /**
+   * The token for `server`, after collecting it from a pending access
+   * request that has been answered since.
+   */
+  async token(server: string): Promise<string | undefined> {
+    const origin = originOf(server)
+    const st = await this.load()
+    const s = st.servers[origin]
+    if (!s) return undefined
+    if (s.token) return s.token
+    if (!s.href) return undefined
+    try {
+      const r = await this.timed(new URL(s.href, origin).href)
+      if (r.status === 404) {
+        // The server forgot the request (a restart): ask again next time.
+        delete st.servers[origin]
+        await this.save()
+        return undefined
+      }
+      if (!r.ok) return undefined
+      const body = (await r.json()) as {
+        state?: unknown
+        accessRequest?: { permission?: unknown; token?: unknown }
+      }
+      if (body.state !== 'COMPLETED') return undefined
+      const ar = body.accessRequest
+      if (ar?.permission === 'APPROVED' && typeof ar.token === 'string') {
+        st.servers[origin] = { token: ar.token }
+      } else {
+        delete st.servers[origin]
+      }
+      await this.save()
+      return st.servers[origin]?.token
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * Ask `server` for admin access, unless a request is already open.
+   * True when one is open there now.
+   */
+  async request(server: string): Promise<boolean> {
+    const origin = originOf(server)
+    const st = await this.load()
+    // A token collected meanwhile is access already; a cached request is
+    // checked first, since the server may have dropped or answered it.
+    if ((await this.token(origin)) !== undefined) return true
+    if (st.servers[origin]?.href) return true
+    try {
+      const r = await this.timed(`${origin}/signalk/v1/access/requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientId: st.clientId,
+          description: `HMI Designer on ${hostname()}`,
+          permissions: 'admin'
+        })
+      })
+      const body = (await r.json().catch(() => ({}))) as { href?: unknown }
+      if (r.ok && typeof body.href === 'string') {
+        st.servers[origin] = { href: body.href }
+        await this.save()
+        return true
+      }
+    } catch {
+      /* the server did not answer: the next attempt asks again */
+    }
+    return false
+  }
+
+  /**
+   * Drop `refused`, a token the server no longer accepts. A newer token
+   * collected meanwhile stays.
+   */
+  async forget(server: string, refused: string): Promise<void> {
+    const origin = originOf(server)
+    const st = await this.load()
+    if (st.servers[origin]?.token !== refused) return
+    delete st.servers[origin]
+    await this.save()
+  }
+
+  /**
+   * The browser displays on the Signal K server at `server`. `locked` is
+   * true when it refused to list them: the designer has no access there
+   * yet, and an admin here has to ask for it (`request`).
+   */
+  async displays(
+    server: string
+  ): Promise<{ displays: RemoteDisplay[]; locked: boolean }> {
+    const origin = originOf(server)
+    const token = await this.token(origin)
+    let r: Response
+    try {
+      r = await this.timed(`${origin}${HMI_DISPLAYS}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      })
+    } catch {
+      return { displays: [], locked: false }
+    }
+    if (r.status === 401) {
+      if (token) await this.forget(origin, token)
+      return { displays: [], locked: true }
+    }
+    if (r.status === 403) return { displays: [], locked: token === undefined }
+    if (!r.ok) return { displays: [], locked: false }
+    const body = (await r.json().catch(() => null)) as {
+      displays?: unknown
+    } | null
+    const list = Array.isArray(body?.displays) ? body.displays : []
+    const host = new URL(origin).host
+    const out: RemoteDisplay[] = []
+    for (const d of list) {
+      if (typeof d !== 'object' || d === null) continue
+      const { id, name } = d as { id?: unknown; name?: unknown }
+      if (typeof id !== 'string' || id === '') continue
+      const label = typeof name === 'string' && name ? name : id
+      out.push({
+        url: `${origin}${HMI_DISPLAYS}/${encodeURIComponent(id)}`,
+        name: `${label} (browser display on ${host})`,
+        txt: {}
+      })
+    }
+    return { displays: out, locked: false }
+  }
+}

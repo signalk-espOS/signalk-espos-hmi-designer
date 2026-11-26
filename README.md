@@ -10,9 +10,10 @@ Reference target: [espos-p4-cockpit](https://github.com/dirkwa/espos-p4-cockpit)
 
 Install as a SignalK plugin; open the **espOS HMI Designer** webapp from the SK admin UI:
 
-1. **Connect** to a device URL. The designer GETs `/hello` to learn the widget catalog, display size, advertised capabilities (screenshot formats, idle-timeout support, ...) and the currently-active layout name.
-2. **Add widgets** from the list on the left onto a canvas sized to the device's display, and move them by the bar above the selected widget. Tapping a widget opens its sheet (data, display, colors, position); its path is picked there from a search over this server's paths, by path or description, with each path's current value. A bind may also reach into an object-valued path by appending the field name, e.g. `navigation.position.latitude`: the designer subscribes to `navigation.position`, reads `latitude` from each update and takes zones and units from the parent path's metadata. This resolves in the designer preview only. The panel firmware subscribes to binds as literal SignalK paths and cannot read a field inside an object value, so Push refuses a layout that contains such a bind until the firmware supports it.
-3. **Push layout** — POSTs the JSON via a server-side proxy to the device's `/layout`, which stages it offscreen, swaps atomically, and persists to LittleFS on success.
+1. **Find** a target with **Search network**: cockpit panels on the LAN (mDNS `_signalk-player._tcp`), the [signalk-espos-hmi](https://github.com/signalk-espOS/signalk-espos-hmi) browser displays on this server, and those on other Signal K servers in the LAN (`_signalk-http._tcp`). Pushing to another server needs admin rights there: the designer sends that server a Signal K access request, and once an admin approves it under Security → Access Requests, keeps the token on this server. It never reaches the browser.
+2. **Connect** to a device URL. The designer GETs `/hello` to learn the widget catalog, display size, advertised capabilities (screenshot formats, idle-timeout support, ...) and the currently-active layout name.
+3. **Add widgets** from the list on the left onto a canvas sized to the device's display, and move them by the bar above the selected widget. Tapping a widget opens its sheet (data, display, colors, position); its path is picked there from a search over this server's paths, by path or description, with each path's current value. A bind may also reach into an object-valued path by appending the field name, e.g. `navigation.position.latitude`: the designer subscribes to `navigation.position`, reads `latitude` from each update and takes zones and units from the parent path's metadata. This resolves in the designer preview only. The panel firmware subscribes to binds as literal SignalK paths and cannot read a field inside an object value, so Push refuses a layout that contains such a bind until the firmware supports it.
+4. **Push layout** — POSTs the JSON via a server-side proxy to the device's `/layout`, which stages it offscreen, swaps atomically, and persists to LittleFS on success.
 
 ## Preview modes
 
@@ -130,7 +131,6 @@ The plugin compiles to `plugin/`; the webapp to `public/`. Both are gitignored. 
 
 v0.2 — daily-usable for layout iteration against the reference firmware. Open items:
 
-- mDNS browse for device discovery (still URL-entry only).
 - Map / chart widget.
 - AIS radar / polar plot widget.
 - `notifications` widget v2 — arbitrary array paths with filter + projection mini-language (today it's bound to the firmware's notifications registry).
