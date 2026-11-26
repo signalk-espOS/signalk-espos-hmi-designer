@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { Bonjour, type Service } from 'bonjour-service'
 import {
+  CertChangedError,
   HMI_DISPLAYS,
   RemoteAccess,
   adminMessage,
@@ -69,11 +70,17 @@ function serviceHost(svc: Service): string | undefined {
   return svc.host ?? svc.addresses?.find((a: string) => a.includes('.'))
 }
 
-function serviceUrl(svc: Service): string | undefined {
+function serviceUrl(
+  svc: Service,
+  scheme: 'http' | 'https' = 'http'
+): string | undefined {
   const host = serviceHost(svc)
   if (!host || !svc.port) return undefined
   const name = host.replace(/\.$/, '')
-  return svc.port === 80 ? `http://${name}` : `http://${name}:${svc.port}`
+  const plain = scheme === 'http' ? 80 : 443
+  return svc.port === plain
+    ? `${scheme}://${name}`
+    : `${scheme}://${name}:${svc.port}`
 }
 
 /**
@@ -158,16 +165,22 @@ const plugin = (app: ServerAPI): Plugin => {
       readable.get('/devices', (_req: Request, res: Response) => {
         const bonjour = new Bonjour()
         const found = new Map<string, DiscoveredDevice>()
-        const servers = new Set<string>()
         // Other Signal K servers on the LAN may run signalk-espos-hmi
-        // with displays of their own.
-        const skBrowser = bonjour.find({
-          type: 'signalk-http',
-          protocol: 'tcp'
-        })
-        skBrowser.on('up', (svc) => {
-          const url = serviceUrl(svc)
-          if (url && !isThisHost(svc)) servers.add(originOf(url))
+        // with displays of their own. A server with SSL on advertises both
+        // services under one instance name, and HTTPS keeps the
+        // designer's token off the wire; two servers on one host stay two.
+        const plain = new Map<string, string>()
+        const secure = new Map<string, string>()
+        const skBrowsers = (['http', 'https'] as const).map((scheme) => {
+          const b = bonjour.find({ type: `signalk-${scheme}`, protocol: 'tcp' })
+          b.on('up', (svc) => {
+            const url = serviceUrl(svc, scheme)
+            const host = serviceHost(svc)
+            if (!url || !host || isThisHost(svc)) return
+            const key = `${host}\n${svc.name ?? ''}`
+            ;(scheme === 'https' ? secure : plain).set(key, originOf(url))
+          })
+          return b
         })
         const browser = bonjour.find({
           type: 'signalk-player',
@@ -186,8 +199,12 @@ const plugin = (app: ServerAPI): Plugin => {
         // then return whatever answered rather than holding the request.
         setTimeout(() => {
           browser.stop()
-          skBrowser.stop()
+          for (const b of skBrowsers) b.stop()
           bonjour.destroy()
+          const servers = new Set(secure.values())
+          for (const [key, origin] of plain) {
+            if (!secure.has(key)) servers.add(origin)
+          }
           if (servers.size === 0) {
             res.json({ devices: [...found.values()] })
             return
@@ -348,7 +365,6 @@ const plugin = (app: ServerAPI): Plugin => {
           // own access there, not the panel broker.
           const hmi = hmiOrigin(url)
           const token = hmi ? await remote.token(hmi) : undefined
-          if (token) headers.Authorization = `Bearer ${token}`
           const broker = hmi ? undefined : esposBroker()
           if (broker) {
             try {
@@ -364,6 +380,22 @@ const plugin = (app: ServerAPI): Plugin => {
               if (controller.signal.aborted) throw err
               const msg = err instanceof Error ? err.message : String(err)
               app.debug(`espos-manager could not send ${url}: ${msg}`)
+            }
+          }
+          if (hmi) {
+            try {
+              upstream = await remote.fetch(url, init, { auth: true })
+            } catch (err) {
+              if (!(err instanceof CertChangedError)) throw err
+              clearTimeout(t)
+              // The access there is gone; ask the server as it is now.
+              const asked = await remote.request(hmi)
+              res.status(401).json({
+                error: asked
+                  ? `${err.message}: ${approveMessage(hmi)}`
+                  : err.message
+              })
+              return
             }
           }
           upstream ??= await fetch(url, init)

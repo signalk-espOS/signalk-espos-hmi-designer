@@ -545,6 +545,7 @@ describe('GET /devices', () => {
     sink: ReturnType<typeof jsonSink>
     browser: (typeof mdns.instances)[number]['browser']
     servers: (typeof mdns.instances)[number]['browser']
+    secure: (typeof mdns.instances)[number]['browser']
     destroy: () => void
   }
 
@@ -561,11 +562,14 @@ describe('GET /devices', () => {
     void handler({} as Request, sink.res)
     const inst = mdns.instances.find((i) => i.type === 'signalk-player')
     const sk = mdns.instances.find((i) => i.type === 'signalk-http')
-    if (!inst || !sk) throw new Error('route did not open both mDNS browsers')
+    const sks = mdns.instances.find((i) => i.type === 'signalk-https')
+    if (!inst || !sk || !sks)
+      throw new Error('route did not open every mDNS browser')
     return {
       sink,
       browser: inst.browser,
       servers: sk.browser,
+      secure: sks.browser,
       destroy: inst.destroy
     }
   }
@@ -638,13 +642,14 @@ describe('GET /devices', () => {
   })
 
   it('stops browsing and tears the instance down after the window', async () => {
-    const { browser, servers, destroy } = browse()
+    const { browser, servers, secure, destroy } = browse()
     await vi.advanceTimersByTimeAsync(1499)
     expect(browser.stop).not.toHaveBeenCalled()
     expect(destroy).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(browser.stop).toHaveBeenCalledTimes(1)
     expect(servers.stop).toHaveBeenCalledTimes(1)
+    expect(secure.stop).toHaveBeenCalledTimes(1)
     expect(destroy).toHaveBeenCalledTimes(1)
   })
 
@@ -710,6 +715,36 @@ describe('GET /devices', () => {
       ]
     })
     expect(remote.seen.map((r) => r.method)).toEqual(['GET'])
+  })
+
+  it('reaches a server over HTTPS when it offers both', async () => {
+    const { sink, servers, secure } = browse()
+    const boat2 = { name: 'boat2', host: 'localhost', addresses: ['192.0.2.7'] }
+    // Port 9 (discard) answers nothing, so the scan names what it tried.
+    servers.emitUp(svc({ ...boat2, port: 9 }))
+    secure.emitUp(svc({ ...boat2, port: 9 }))
+    servers.emitUp(svc({ ...boat2, port: 9 }))
+    await vi.advanceTimersByTimeAsync(1500)
+    await vi.waitFor(() => expect(sink.calls()).toBe(1))
+    expect(sink.payload()).toEqual({
+      devices: [],
+      failed: ['https://localhost:9']
+    })
+  })
+
+  it('keeps two servers on one host apart', async () => {
+    const { sink, servers, secure } = browse()
+    const host = { host: 'localhost', addresses: ['192.0.2.7'] }
+    servers.emitUp(svc({ ...host, name: 'boat2', port: 9 }))
+    servers.emitUp(svc({ ...host, name: 'test', port: 7 }))
+    secure.emitUp(svc({ ...host, name: 'test', port: 9 }))
+    await vi.advanceTimersByTimeAsync(1500)
+    await vi.waitFor(() => expect(sink.calls()).toBe(1))
+    const failed = (sink.payload() as { failed?: string[] }).failed
+    expect([...(failed ?? [])].sort()).toEqual([
+      'http://localhost:9',
+      'https://localhost:9'
+    ])
   })
 
   it('leaves this server out', async () => {

@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { RemoteAccess, approveMessage, hmiOrigin } from '../src/remote'
+import {
+  CertChangedError,
+  RemoteAccess,
+  approveMessage,
+  hmiOrigin
+} from '../src/remote'
+import type { CertCheck } from '../src/pinned'
 
 const ORIGIN = 'http://boat2.local:3000'
 
@@ -22,11 +28,10 @@ function fakeServer(routes: Record<string, () => Response>): {
   const fetchFn = ((input: string | URL, init: RequestInit = {}) => {
     const url = String(input)
     const method = init.method ?? 'GET'
-    const headers = (init.headers ?? {}) as Record<string, string>
     seen.push({
       method,
       url,
-      auth: headers.Authorization,
+      auth: new Headers(init.headers).get('authorization') ?? undefined,
       body: typeof init.body === 'string' ? init.body : undefined
     })
     const route = routes[`${method} ${new URL(url).pathname}`]
@@ -331,5 +336,134 @@ describe('RemoteAccess', () => {
 
   it('says where to approve', () => {
     expect(approveMessage(ORIGIN)).toContain('boat2.local:3000')
+  })
+})
+
+describe('RemoteAccess over HTTPS', () => {
+  const SECURE = 'https://boat2.local:3443'
+
+  /** The server behind `fetchFn`, showing whichever certificate `cert` names. */
+  function tlsServer(fetchFn: typeof fetch, trusted = false) {
+    const cert = { fp: 'AA:01' }
+    const pinned = async (
+      url: string,
+      init: RequestInit,
+      check: CertCheck
+    ): Promise<Response> => {
+      const extra = await check(cert.fp, trusted)
+      const headers = { ...(init.headers as Record<string, string>), ...extra }
+      return fetchFn(url, { ...init, headers })
+    }
+    return { cert, pinned }
+  }
+
+  const approved = () =>
+    fakeServer({
+      'GET /plugins/signalk-espos-hmi/displays': () => json({ displays: [] }),
+      'POST /signalk/v1/access/requests': () =>
+        json({ href: '/signalk/v1/requests/42' }, 202),
+      'GET /signalk/v1/requests/42': () =>
+        json({
+          state: 'COMPLETED',
+          accessRequest: { permission: 'APPROVED', token: 'tok' }
+        })
+    })
+
+  it('keeps the token while the certificate stays the same', async () => {
+    const { fetchFn, seen } = approved()
+    const { pinned } = tlsServer(fetchFn)
+    const ra = new RemoteAccess(() => dataDir, fetchFn, pinned)
+    await ra.request(SECURE)
+    expect(await ra.token(SECURE)).toBe('tok')
+
+    const again = new RemoteAccess(() => dataDir, fetchFn, pinned)
+    expect((await again.displays(SECURE)).status).toBe('ok')
+    expect(seen.at(-1)?.auth).toBe('Bearer tok')
+  })
+
+  it('drops the token rather than send it past a new certificate', async () => {
+    const { fetchFn, seen } = approved()
+    const { cert, pinned } = tlsServer(fetchFn)
+    const ra = new RemoteAccess(() => dataDir, fetchFn, pinned)
+    await ra.request(SECURE)
+    expect(await ra.token(SECURE)).toBe('tok')
+    const sent = seen.length
+
+    cert.fp = 'BB:02'
+    await expect(
+      ra.fetch(`${SECURE}/plugins/signalk-espos-hmi/displays/x/layout`)
+    ).rejects.toBeInstanceOf(CertChangedError)
+    expect(seen).toHaveLength(sent)
+    expect(await ra.token(SECURE)).toBeUndefined()
+
+    // The old pin survives a restart: the scan sends nothing either.
+    const again = new RemoteAccess(() => dataDir, fetchFn, pinned)
+    expect((await again.displays(SECURE)).status).toBe('failed')
+    expect(seen).toHaveLength(sent)
+  })
+
+  it('keeps the old pin when a stranger answers once', async () => {
+    const { fetchFn } = approved()
+    const { cert, pinned } = tlsServer(fetchFn)
+    const ra = new RemoteAccess(() => dataDir, fetchFn, pinned)
+    await ra.displays(SECURE)
+    cert.fp = 'BB:02'
+    await expect(ra.fetch(`${SECURE}/x`)).rejects.toBeInstanceOf(
+      CertChangedError
+    )
+    cert.fp = 'AA:01'
+    expect((await ra.fetch(`${SECURE}/x`)).status).toBe(404)
+  })
+
+  it('takes a new certificate when asked for access', async () => {
+    const { fetchFn, seen } = approved()
+    const { cert, pinned } = tlsServer(fetchFn)
+    const ra = new RemoteAccess(() => dataDir, fetchFn, pinned)
+    await ra.request(SECURE)
+    expect(await ra.token(SECURE)).toBe('tok')
+
+    // The server was set up again: the user connects, an admin approves.
+    cert.fp = 'BB:02'
+    await expect(
+      ra.fetch(`${SECURE}/x`, {}, { auth: true })
+    ).rejects.toBeInstanceOf(CertChangedError)
+    expect(await ra.request(SECURE)).toBe(true)
+    expect(seen.filter((r) => r.method === 'POST')).toHaveLength(2)
+    expect(await ra.token(SECURE)).toBe('tok')
+    expect((await ra.displays(SECURE)).status).toBe('ok')
+    expect(seen.at(-1)?.auth).toBe('Bearer tok')
+  })
+
+  it('pins nothing for a certificate a CA vouches for', async () => {
+    const { fetchFn } = approved()
+    const { cert, pinned } = tlsServer(fetchFn, true)
+    const ra = new RemoteAccess(() => dataDir, fetchFn, pinned)
+    await ra.request(SECURE)
+    cert.fp = 'BB:02'
+    expect(await ra.token(SECURE)).toBe('tok')
+  })
+
+  it('refuses a self-signed stand-in for a CA-signed server', async () => {
+    const { fetchFn, seen } = approved()
+    const ca = tlsServer(fetchFn, true)
+    const ra = new RemoteAccess(() => dataDir, fetchFn, ca.pinned)
+    await ra.request(SECURE)
+    expect(await ra.token(SECURE)).toBe('tok')
+    const sent = seen.length
+
+    const stand = tlsServer(fetchFn, false)
+    const again = new RemoteAccess(() => dataDir, fetchFn, stand.pinned)
+    await expect(
+      again.fetch(`${SECURE}/x`, {}, { auth: true })
+    ).rejects.toBeInstanceOf(CertChangedError)
+    expect(seen).toHaveLength(sent)
+  })
+
+  it('goes over plain fetch for HTTP', async () => {
+    const { fetchFn } = approved()
+    const pinned = vi.fn()
+    const ra = new RemoteAccess(() => dataDir, fetchFn, pinned)
+    await ra.displays(ORIGIN)
+    expect(pinned).not.toHaveBeenCalled()
   })
 })

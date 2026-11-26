@@ -2,12 +2,15 @@ import { promises as fs } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { hostname, networkInterfaces } from 'node:os'
 import path from 'node:path'
+import { pinnedFetch } from './pinned.js'
 
 /** Where signalk-espos-hmi lists its browser displays. */
 export const HMI_DISPLAYS = '/plugins/signalk-espos-hmi/displays'
 const HMI_PREFIX = '/plugins/signalk-espos-hmi/'
 const ACCESS_FILE = 'remote-access.json'
 const CHECK_TIMEOUT_MS = 2000
+/** In place of a pin: this server's certificate chains to a known CA. */
+const CA_VOUCHED = 'ca'
 
 export interface RemoteScan {
   displays: RemoteDisplay[]
@@ -34,9 +37,25 @@ interface ServerAccess {
 interface AccessFile {
   clientId: string
   servers: Record<string, ServerAccess>
+  /**
+   * The SHA-256 fingerprint of each HTTPS server's self-signed
+   * certificate, as first seen, or CA_VOUCHED.
+   */
+  certs: Record<string, string>
 }
 
 type Fetch = typeof fetch
+type Pinned = typeof pinnedFetch
+
+/** A server whose certificate is not the one it showed before. */
+export class CertChangedError extends Error {
+  constructor(origin: string) {
+    super(
+      `${new URL(origin).host} shows a different certificate than before, ` +
+        'so the HMI Designer dropped its access there'
+    )
+  }
+}
 
 /** A server's origin as URL parsing spells it (host in lower case). */
 export function originOf(server: string): string {
@@ -92,7 +111,8 @@ export class RemoteAccess {
 
   constructor(
     private readonly dataDir: () => string,
-    private readonly fetchFn: Fetch = (...a) => fetch(...a)
+    private readonly fetchFn: Fetch = (...a) => fetch(...a),
+    private readonly pinned: Pinned = pinnedFetch
   ) {}
 
   // One shared load: parallel callers on a first scan must not each make
@@ -108,12 +128,16 @@ export class RemoteAccess {
         await fs.readFile(path.join(this.dataDir(), ACCESS_FILE), 'utf-8')
       ) as Partial<AccessFile>
       if (typeof raw.clientId === 'string' && raw.servers) {
-        return { clientId: raw.clientId, servers: raw.servers }
+        return {
+          clientId: raw.clientId,
+          servers: raw.servers,
+          certs: raw.certs ?? {}
+        }
       }
     } catch {
       /* first use, or a broken file: start over */
     }
-    return { clientId: randomUUID(), servers: {} }
+    return { clientId: randomUUID(), servers: {}, certs: {} }
   }
 
   private async save(): Promise<void> {
@@ -134,11 +158,88 @@ export class RemoteAccess {
     return this.writing
   }
 
-  private async timed(url: string, init: RequestInit = {}): Promise<Response> {
-    return this.fetchFn(url, {
-      ...init,
-      signal: AbortSignal.timeout(CHECK_TIMEOUT_MS)
+  /**
+   * A request to another server, with the designer's token there when
+   * `auth` is set. Over HTTPS the certificate is pinned on first use, as
+   * SSH does: a Signal K server's own certificate is self-signed, so no
+   * CA can vouch for it. The token is read only once the certificate
+   * passed, so a request racing a changed one cannot carry it.
+   */
+  async fetch(
+    url: string,
+    init: RequestInit = {},
+    { auth = false, repin = false } = {}
+  ): Promise<Response> {
+    const origin = originOf(url)
+    const authHeader = async (): Promise<Record<string, string>> => {
+      if (!auth) return {}
+      const token = (await this.load()).servers[origin]?.token
+      return token ? { Authorization: `Bearer ${token}` } : {}
+    }
+    if (new URL(url).protocol !== 'https:') {
+      const headers = new Headers(init.headers)
+      for (const [k, v] of Object.entries(await authHeader())) {
+        headers.set(k, v)
+      }
+      return this.fetchFn(url, {
+        ...init,
+        headers: Object.fromEntries(headers)
+      })
+    }
+    return this.pinned(url, init, async (fp, trusted) => {
+      await this.checkCert(origin, fp, trusted, repin)
+      return authHeader()
     })
+  }
+
+  /**
+   * `repin` takes a changed certificate as the server's new one: only an
+   * access request does, since the user asked for it and an admin there
+   * has to approve it. Otherwise the old pin stays, so a stranger
+   * answering once does not lock out the real server.
+   */
+  private async checkCert(
+    origin: string,
+    fingerprint: string,
+    trusted: boolean,
+    repin: boolean
+  ): Promise<void> {
+    const st = await this.load()
+    const known = st.certs[origin]
+    if (trusted) {
+      // Renewals pass the CA check, but a self-signed stand-in for this
+      // server must not then be pinned as if first seen.
+      if (known !== CA_VOUCHED) {
+        st.certs[origin] = CA_VOUCHED
+        await this.save()
+      }
+      return
+    }
+    if (known === fingerprint) return
+    if (known !== undefined && !repin) {
+      // Whoever answers now must not get the token the old server issued.
+      if (st.servers[origin]) {
+        delete st.servers[origin]
+        await this.save()
+      }
+      throw new CertChangedError(origin)
+    }
+    st.certs[origin] = fingerprint
+    // Nothing the old server issued carries over to the new one.
+    if (known !== undefined) delete st.servers[origin]
+    await this.save()
+  }
+
+  private async timed(
+    url: string,
+    init: RequestInit = {},
+    opts: { auth?: boolean; repin?: boolean } = {}
+  ): Promise<Response> {
+    return this.fetch(
+      url,
+      { ...init, signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) },
+      opts
+    )
   }
 
   /**
@@ -205,15 +306,19 @@ export class RemoteAccess {
     if ((await this.token(origin)) !== undefined) return true
     if (st.servers[origin]?.href) return true
     try {
-      const r = await this.timed(`${origin}/signalk/v1/access/requests`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientId: st.clientId,
-          description: `HMI Designer on ${hostname()}`,
-          permissions: 'admin'
-        })
-      })
+      const r = await this.timed(
+        `${origin}/signalk/v1/access/requests`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clientId: st.clientId,
+            description: `HMI Designer on ${hostname()}`,
+            permissions: 'admin'
+          })
+        },
+        { repin: true }
+      )
       const body = (await r.json().catch(() => ({}))) as { href?: unknown }
       if (r.ok && typeof body.href === 'string') {
         st.servers[origin] = { href: body.href }
@@ -244,9 +349,7 @@ export class RemoteAccess {
     const token = await this.token(origin)
     let r: Response
     try {
-      r = await this.timed(`${origin}${HMI_DISPLAYS}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      })
+      r = await this.timed(`${origin}${HMI_DISPLAYS}`, {}, { auth: true })
     } catch {
       return { displays: [], status: 'failed' }
     }
