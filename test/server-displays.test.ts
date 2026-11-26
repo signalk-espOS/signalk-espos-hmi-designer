@@ -3,7 +3,8 @@ import {
   HMI_DISPLAYS,
   fetchDevices,
   fetchServerDisplays,
-  requestRemoteAccess,
+  scanNotes,
+  isServerAccessEntry,
   isServerDisplay,
   matchDevice,
   normalizeDeviceUrl,
@@ -115,45 +116,55 @@ describe('fetchDevices', () => {
     vi.unstubAllGlobals()
   })
 
-  it('passes on the servers that have not let the designer in', async () => {
-    const locked = ['http://boat2.local:3000']
+  it('passes on the servers a scan could not read', async () => {
+    const failed = ['http://boat2.local:3000']
     vi.stubGlobal(
       'fetch',
       vi.fn(() =>
         Promise.resolve(
-          new Response(JSON.stringify({ devices: [], locked: [...locked, 7] }))
+          new Response(JSON.stringify({ devices: [], failed: [...failed, 7] }))
         )
       )
     )
-    await expect(fetchDevices()).resolves.toEqual({ devices: [], locked })
+    await expect(fetchDevices()).resolves.toEqual({
+      devices: [],
+      limited: [],
+      failed
+    })
   })
 })
 
-describe('requestRemoteAccess', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  const answer = (status: number, body: unknown): void => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() =>
-        Promise.resolve(new Response(JSON.stringify(body), { status }))
+describe('scanNotes', () => {
+  it('names servers short of admin and servers that did not answer', () => {
+    expect(
+      scanNotes(
+        {
+          devices: [],
+          limited: ['http://a.local:3000'],
+          failed: ['http://b.local:3000', 'http://c.local']
+        },
+        false
       )
-    )
-  }
-
-  it("relays the plugin's instruction", async () => {
-    answer(200, { message: 'approve it there' })
-    await expect(requestRemoteAccess('http://boat2.local:3000')).resolves.toBe(
-      'approve it there'
-    )
+    ).toEqual([
+      'a.local:3000 let the HMI Designer in without admin rights: give it ' +
+        'admin under Security → Devices there',
+      'no display list from b.local:3000, c.local'
+    ])
   })
 
-  it('asks a non-admin to sign in', async () => {
-    answer(401, {})
-    await expect(requestRemoteAccess('http://boat2.local:3000')).resolves.toBe(
-      'sign in to Signal K as an admin to connect to boat2.local:3000'
+  it('keeps quiet about silent servers when the scan found targets', () => {
+    expect(
+      scanNotes({ devices: [], limited: [], failed: ['http://b.local'] }, true)
+    ).toEqual([])
+  })
+})
+
+describe('isServerAccessEntry', () => {
+  it('tells the access entry from a display', () => {
+    expect(isServerAccessEntry(`http://b.local:3000${HMI_DISPLAYS}`)).toBe(true)
+    expect(isServerAccessEntry(`http://b.local:3000${HMI_DISPLAYS}/helm`)).toBe(
+      false
     )
+    expect(isServerAccessEntry('http://espos-1a2b.local')).toBe(false)
   })
 })

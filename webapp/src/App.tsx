@@ -76,8 +76,10 @@ import {
 import {
   deriveDisplayDefaults,
   deviceLabel,
+  checkServerAccess,
   fetchDevices,
-  requestRemoteAccess,
+  isServerAccessEntry,
+  scanNotes,
   fetchServerDisplays,
   connectPanel,
   fetchPathMeta,
@@ -1287,14 +1289,26 @@ export function App(): React.JSX.Element {
         ...(panels.status === 'fulfilled' ? panels.value.devices : []),
         ...(displays.status === 'fulfilled' ? displays.value : [])
       ])
-      const locked = panels.status === 'fulfilled' ? panels.value.locked : []
-      const access = await Promise.all(locked.map(requestRemoteAccess))
+      // A source that failed is said, also beside what the other found.
+      const notes =
+        panels.status === 'fulfilled'
+          ? scanNotes(panels.value, found.length > 0)
+          : []
+      for (const r of [panels, displays]) {
+        if (r.status === 'rejected') {
+          notes.push(
+            r.reason instanceof Error ? r.reason.message : String(r.reason)
+          )
+        }
+      }
       setDevices(found)
       // One panel on the LAN is the common case — select it outright
       // rather than making the user pick from a list of one.
-      if (found.length === 1 && found[0]) setDeviceUrl(found[0].url)
-      if (access.length > 0) {
-        setHelloErr(access.join('; '))
+      // Never an access entry: connecting to it asks another server.
+      if (found.length === 1 && found[0] && !isServerAccessEntry(found[0].url))
+        setDeviceUrl(found[0].url)
+      if (notes.length > 0) {
+        setHelloErr(notes.join('; '))
       } else if (found.length === 0) {
         setHelloErr(
           'No panels or browser displays found. Check the panel is ' +
@@ -1324,6 +1338,15 @@ export function App(): React.JSX.Element {
     const gen = ++connectGen.current
     // Results only count while this is still the newest attempt.
     const current = (): boolean => gen === connectGen.current
+    if (isServerAccessEntry(target)) {
+      try {
+        const next = await checkServerAccess(target)
+        if (current()) setHelloErr(next)
+      } catch (e) {
+        if (current()) setHelloErr(e instanceof Error ? e.message : String(e))
+      }
+      return
+    }
     try {
       // A remembered :8081 is a panel from before the layout API moved to
       // port 80; connectPanel finds it there and the box follows, unless

@@ -452,38 +452,6 @@ describe('POST /device-proxy to another Signal K server', () => {
   })
 })
 
-describe('POST /remote-access', () => {
-  it('wants an http(s) server', async () => {
-    mounted = await mount(dataDir)
-    const r = await fetch(`${mounted.base}/remote-access`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ server: 'file:///etc' })
-    })
-    expect(r.status).toBe(400)
-  })
-
-  it('says where to approve once the server took the request', async () => {
-    const remote = await upstream({
-      status: 202,
-      contentType: 'application/json',
-      body: JSON.stringify({ href: '/signalk/v1/requests/1' })
-    })
-    cleanups.push(remote.close)
-    mounted = await mount(dataDir)
-    const r = await fetch(`${mounted.base}/remote-access`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ server: remote.url })
-    })
-    expect(r.status).toBe(200)
-    expect(((await r.json()) as { message: string }).message).toContain(
-      'Access Requests'
-    )
-    expect(remote.seen[0]?.url).toBe('/signalk/v1/access/requests')
-  })
-})
-
 describe('POST /device-proxy through signalk-espos-manager', () => {
   const g = globalThis as { __signalk_esposManager?: unknown }
   afterEach(() => {
@@ -698,12 +666,50 @@ describe('GET /devices', () => {
       devices: [
         {
           url: `http://localhost:${port}/plugins/signalk-espos-hmi/displays/salon`,
-          name: `Salon (browser display on localhost:${port})`,
+          name: `Salon (browser display)`,
           txt: {}
         }
       ]
     })
     expect(remote.seen[0]?.url).toBe('/plugins/signalk-espos-hmi/displays')
+  })
+
+  it('names a server that answered with an error', async () => {
+    const remote = await upstream({ status: 500, body: '{}' })
+    cleanups.push(remote.close)
+    const port = Number(new URL(remote.url).port)
+    const { sink, servers } = browse()
+    servers.emitUp(
+      svc({ name: 'boat2', host: 'localhost', addresses: ['192.0.2.7'], port })
+    )
+    await vi.advanceTimersByTimeAsync(1500)
+    await vi.waitFor(() => expect(sink.calls()).toBe(1))
+    expect(sink.payload()).toEqual({
+      devices: [],
+      failed: [`http://localhost:${port}`]
+    })
+  })
+
+  it('offers a server that wants a login as an entry, without asking it', async () => {
+    const remote = await upstream({ status: 401, body: '{}' })
+    cleanups.push(remote.close)
+    const port = Number(new URL(remote.url).port)
+    const { sink, servers } = browse()
+    servers.emitUp(
+      svc({ name: 'boat2', host: 'localhost', addresses: ['192.0.2.7'], port })
+    )
+    await vi.advanceTimersByTimeAsync(1500)
+    await vi.waitFor(() => expect(sink.calls()).toBe(1))
+    expect(sink.payload()).toEqual({
+      devices: [
+        {
+          url: `http://localhost:${port}/plugins/signalk-espos-hmi/displays`,
+          name: 'Signal K server: connect to ask for access',
+          txt: {}
+        }
+      ]
+    })
+    expect(remote.seen.map((r) => r.method)).toEqual(['GET'])
   })
 
   it('leaves this server out', async () => {
@@ -741,10 +747,6 @@ describe('route access', () => {
       'GET /layout',
       'GET /status'
     ])
-    expect(direct.sort()).toEqual([
-      'POST /device-proxy',
-      'POST /remote-access',
-      'PUT /layout'
-    ])
+    expect(direct.sort()).toEqual(['POST /device-proxy', 'PUT /layout'])
   })
 })

@@ -46,6 +46,33 @@ function currentOrigin(): string | undefined {
   return typeof location === 'undefined' ? undefined : location.origin
 }
 
+/**
+ * The scan's entry for a server that has not let the designer in yet:
+ * the display list itself rather than a display.
+ */
+export function isServerAccessEntry(url: string): boolean {
+  try {
+    return new URL(url).pathname.replace(/\/$/, '') === HMI_DISPLAYS
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Connect to a server access entry: the plugin asks that server for
+ * access if it has none there yet. Answers with what the user does next.
+ */
+export async function checkServerAccess(url: string): Promise<string> {
+  await deviceProxy<unknown>({ url, method: 'GET' })
+  let host = url
+  try {
+    host = new URL(url).host
+  } catch {
+    /* keep it as given */
+  }
+  return `${host} lets the HMI Designer in: search again to list its displays`
+}
+
 /** A browser display of signalk-espos-hmi, on any server. */
 export function isBrowserDisplay(url: string): boolean {
   try {
@@ -616,58 +643,61 @@ export async function fetchDevices(): Promise<Discovery> {
   ) {
     throw new Error('device discovery returned an unexpected shape')
   }
-  const { devices, locked } = body as {
+  const { devices, limited, failed } = body as {
     devices: DiscoveredDevice[]
-    locked?: unknown
+    limited?: unknown
+    failed?: unknown
   }
-  return {
-    devices,
-    locked: Array.isArray(locked)
-      ? locked.filter((a): a is string => typeof a === 'string')
-      : []
-  }
+  return { devices, limited: strings(limited), failed: strings(failed) }
+}
+
+function strings(v: unknown): string[] {
+  return Array.isArray(v)
+    ? v.filter((a): a is string => typeof a === 'string')
+    : []
 }
 
 /**
- * What a network scan found: panels and other servers' browser displays,
- * and the servers that run signalk-espos-hmi but have not let the
- * designer in yet.
+ * What a network scan found: panels and browser displays (a server that
+ * has not let the designer in yet is an entry to connect to), the servers
+ * that let it in without admin rights, and the servers that did not
+ * answer.
  */
 export interface Discovery {
   devices: DiscoveredDevice[]
-  locked: string[]
+  limited: string[]
+  failed: string[]
+}
+
+function hostsOf(servers: readonly string[]): string {
+  return servers
+    .map((f) => {
+      try {
+        return new URL(f).host
+      } catch {
+        return f
+      }
+    })
+    .join(', ')
 }
 
 /**
- * Have the plugin ask `server` to let the designer push there. Answers
- * with what the user does next, also when this fails.
+ * What a scan that left servers out tells the user. A server that did
+ * not answer is named only when nothing was `found`: on a marina LAN
+ * other boats' servers would otherwise flag every scan.
  */
-export async function requestRemoteAccess(server: string): Promise<string> {
-  let host = server
-  try {
-    host = new URL(server).host
-  } catch {
-    /* keep it as given */
+export function scanNotes(d: Discovery, found: boolean): string[] {
+  const notes: string[] = []
+  if (d.limited.length > 0) {
+    notes.push(
+      `${hostsOf(d.limited)} let the HMI Designer in without admin ` +
+        'rights: give it admin under Security → Devices there'
+    )
   }
-  try {
-    const r = await fetch(`${PLUGIN_BASE}/remote-access`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ server })
-    })
-    if (r.status === 401 || r.status === 403) {
-      return `sign in to Signal K as an admin to connect to ${host}`
-    }
-    const body = (await r.json().catch(() => ({}))) as {
-      message?: unknown
-      error?: unknown
-    }
-    if (typeof body.message === 'string') return body.message
-    if (typeof body.error === 'string') return body.error
-    return `${host} took no access request (${r.status})`
-  } catch (e) {
-    return `could not ask ${host} for access: ${e instanceof Error ? e.message : String(e)}`
+  if (!found && d.failed.length > 0) {
+    notes.push(`no display list from ${hostsOf(d.failed)}`)
   }
+  return notes
 }
 
 /**

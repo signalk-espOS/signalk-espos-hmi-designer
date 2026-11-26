@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -69,7 +69,10 @@ describe('RemoteAccess', () => {
       'GET /plugins/signalk-espos-hmi/displays': () => json({}, 401)
     })
     const ra = new RemoteAccess(() => dataDir, fetchFn)
-    expect(await ra.displays(ORIGIN)).toEqual({ displays: [], locked: true })
+    expect(await ra.displays(ORIGIN)).toEqual({
+      displays: [],
+      status: 'locked'
+    })
     expect(seen.filter((s) => s.method === 'POST')).toHaveLength(0)
   })
 
@@ -153,7 +156,7 @@ describe('RemoteAccess', () => {
     expect(displays).toEqual([
       {
         url: `${ORIGIN}/plugins/signalk-espos-hmi/displays/salon`,
-        name: 'Salon (browser display on boat2.local:3000)',
+        name: 'Salon (browser display)',
         txt: {}
       }
     ])
@@ -191,7 +194,10 @@ describe('RemoteAccess', () => {
     const ra = new RemoteAccess(() => dataDir, fetchFn)
     await ra.request(ORIGIN)
     expect(await ra.token(ORIGIN)).toBe('old')
-    expect(await ra.displays(ORIGIN)).toEqual({ displays: [], locked: true })
+    expect(await ra.displays(ORIGIN)).toEqual({
+      displays: [],
+      status: 'locked'
+    })
     expect(await ra.token(ORIGIN)).toBeUndefined()
   })
 
@@ -214,7 +220,7 @@ describe('RemoteAccess', () => {
   it('lists nothing from a server without the plugin', async () => {
     const { fetchFn } = fakeServer({})
     const ra = new RemoteAccess(() => dataDir, fetchFn)
-    expect(await ra.displays(ORIGIN)).toEqual({ displays: [], locked: false })
+    expect(await ra.displays(ORIGIN)).toEqual({ displays: [], status: 'ok' })
   })
 
   it('asks again when the server forgot the open request', async () => {
@@ -229,6 +235,98 @@ describe('RemoteAccess', () => {
     await ra.request(ORIGIN)
     await ra.request(ORIGIN)
     expect(posts).toBe(2)
+  })
+
+  it('reports a server that answers with an error as failed', async () => {
+    const { fetchFn } = fakeServer({
+      'GET /plugins/signalk-espos-hmi/displays': () => json({}, 500)
+    })
+    const ra = new RemoteAccess(() => dataDir, fetchFn)
+    expect(await ra.displays(ORIGIN)).toEqual({
+      displays: [],
+      status: 'failed'
+    })
+  })
+
+  it('keeps a request that replaced one being checked', async () => {
+    let release: (() => void) | undefined
+    const { fetchFn } = fakeServer({
+      'POST /signalk/v1/access/requests': () =>
+        json({ href: '/signalk/v1/requests/new' }, 202),
+      'GET /signalk/v1/requests/new': () => json({ state: 'PENDING' })
+    })
+    const slow = ((input: string | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/requests/old')) {
+        return new Promise<Response>((resolve) => {
+          release = () =>
+            resolve(
+              json({
+                state: 'COMPLETED',
+                accessRequest: { permission: 'APPROVED', token: 'stale' }
+              })
+            )
+        })
+      }
+      return fetchFn(input, init)
+    }) as typeof fetch
+    await fs.writeFile(
+      path.join(dataDir, 'remote-access.json'),
+      JSON.stringify({
+        clientId: 'c',
+        servers: { [ORIGIN]: { href: '/signalk/v1/requests/old' } }
+      })
+    )
+    const ra = new RemoteAccess(() => dataDir, slow)
+    const checking = ra.token(ORIGIN)
+    await vi.waitFor(() => expect(release).toBeDefined())
+    // Meanwhile the server forgot the old request and a new one went in.
+    const st = JSON.parse(
+      await fs.readFile(path.join(dataDir, 'remote-access.json'), 'utf-8')
+    ) as { servers: Record<string, { href?: string }> }
+    expect(st.servers[ORIGIN]?.href).toBe('/signalk/v1/requests/old')
+    ;(
+      ra as unknown as {
+        loading: Promise<{ servers: Record<string, { href?: string }> }>
+      }
+    ).loading.then((s) => {
+      s.servers[ORIGIN] = { href: '/signalk/v1/requests/new' }
+    })
+    await Promise.resolve()
+    release?.()
+    expect(await checking).toBeUndefined()
+    expect(await ra.request(ORIGIN)).toBe(true)
+    const after = JSON.parse(
+      await fs.readFile(path.join(dataDir, 'remote-access.json'), 'utf-8')
+    ) as { servers: Record<string, unknown> }
+    expect(after.servers[ORIGIN]).not.toHaveProperty('token')
+  })
+
+  it('tells a token short of admin from no access', async () => {
+    await fs.writeFile(
+      path.join(dataDir, 'remote-access.json'),
+      JSON.stringify({ clientId: 'c', servers: { [ORIGIN]: { token: 't' } } })
+    )
+    const { fetchFn } = fakeServer({
+      'GET /plugins/signalk-espos-hmi/displays': () => json({}, 403)
+    })
+    const ra = new RemoteAccess(() => dataDir, fetchFn)
+    expect(await ra.displays(ORIGIN)).toEqual({
+      displays: [],
+      status: 'limited'
+    })
+    expect(await ra.token(ORIGIN)).toBe('t')
+  })
+
+  it('reports an answer that is not a display list as failed', async () => {
+    const { fetchFn } = fakeServer({
+      'GET /plugins/signalk-espos-hmi/displays': () =>
+        new Response('<html></html>', { status: 200 })
+    })
+    const ra = new RemoteAccess(() => dataDir, fetchFn)
+    expect(await ra.displays(ORIGIN)).toEqual({
+      displays: [],
+      status: 'failed'
+    })
   })
 
   it('says where to approve', () => {

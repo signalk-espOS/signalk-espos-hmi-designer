@@ -4,16 +4,18 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { Bonjour, type Service } from 'bonjour-service'
 import {
+  HMI_DISPLAYS,
   RemoteAccess,
   adminMessage,
   approveMessage,
   hmiOrigin,
   localAddresses,
-  originOf
+  originOf,
+  type RemoteScan
 } from './remote.js'
 
 /** How long a scan waits for other servers to list their displays. */
-const REMOTE_SCAN_MS = 3000
+const REMOTE_SCAN_MS = 5000
 
 /** A cockpit panel found on the LAN via mDNS. */
 interface DiscoveredDevice {
@@ -194,19 +196,36 @@ const plugin = (app: ServerAPI): Plugin => {
           void Promise.all(
             [...servers].map(async (origin) => ({
               origin,
-              ...(await within(remote.displays(origin), REMOTE_SCAN_MS, {
-                displays: [],
-                locked: false
-              }))
+              ...(await within<RemoteScan>(
+                remote.displays(origin),
+                REMOTE_SCAN_MS,
+                { displays: [], status: 'failed' }
+              ))
             }))
           ).then((answers) => {
             const devices = [...found.values()]
-            const locked: string[] = []
+            const limited: string[] = []
+            const failed: string[] = []
             for (const a of answers) {
               devices.push(...a.displays)
-              if (a.locked) locked.push(a.origin)
+              // Asking a server for admin is the user's call, not the
+              // scan's: in a marina the LAN is shared with other boats.
+              // Connecting to this entry asks (see /device-proxy).
+              if (a.status === 'locked') {
+                devices.push({
+                  url: `${a.origin}${HMI_DISPLAYS}`,
+                  name: 'Signal K server: connect to ask for access',
+                  txt: {}
+                })
+              }
+              if (a.status === 'limited') limited.push(a.origin)
+              if (a.status === 'failed') failed.push(a.origin)
             }
-            res.json(locked.length ? { devices, locked } : { devices })
+            res.json({
+              devices,
+              ...(limited.length ? { limited } : {}),
+              ...(failed.length ? { failed } : {})
+            })
           })
         }, 1500)
       })
@@ -252,30 +271,6 @@ const plugin = (app: ServerAPI): Plugin => {
         } catch (err) {
           const e = err as Error
           res.status(500).json({ error: e.message })
-        }
-      })
-
-      // Ask another Signal K server to let the designer push there. Admin
-      // only: the request asks that server for admin rights.
-      router.post('/remote-access', async (req: Request, res: Response) => {
-        const server = (req.body as { server?: unknown } | undefined)?.server
-        let origin: string
-        try {
-          if (typeof server !== 'string') throw new Error('no server')
-          const u = new URL(server)
-          if (u.protocol !== 'http:' && u.protocol !== 'https:')
-            throw new Error('not http')
-          origin = u.origin
-        } catch {
-          res.status(400).json({ error: 'server must be an http(s) url' })
-          return
-        }
-        if (await remote.request(origin)) {
-          res.json({ message: approveMessage(origin) })
-        } else {
-          res.status(502).json({
-            error: `${new URL(origin).host} took no access request`
-          })
         }
       })
 

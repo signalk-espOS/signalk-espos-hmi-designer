@@ -9,6 +9,16 @@ const HMI_PREFIX = '/plugins/signalk-espos-hmi/'
 const ACCESS_FILE = 'remote-access.json'
 const CHECK_TIMEOUT_MS = 2000
 
+export interface RemoteScan {
+  displays: RemoteDisplay[]
+  /**
+   * `locked`: it refused to list them, so the designer has no access
+   * there yet. `limited`: it let the designer in, but not far enough to
+   * list them. `failed`: it did not answer, or not readably.
+   */
+  status: 'ok' | 'locked' | 'limited' | 'failed'
+}
+
 export interface RemoteDisplay {
   url: string
   name: string
@@ -77,6 +87,7 @@ export function localAddresses(): Set<string> {
  */
 export class RemoteAccess {
   private loading: Promise<AccessFile> | undefined
+  private asking = new Map<string, Promise<boolean>>()
   private writing: Promise<void> = Promise.resolve()
 
   constructor(
@@ -143,6 +154,9 @@ export class RemoteAccess {
     if (!s.href) return undefined
     try {
       const r = await this.timed(new URL(s.href, origin).href)
+      // A request that replaced this one while the answer was on its way
+      // is newer: leave it.
+      if (st.servers[origin]?.href !== s.href) return st.servers[origin]?.token
       if (r.status === 404) {
         // The server forgot the request (a restart): ask again next time.
         delete st.servers[origin]
@@ -155,6 +169,7 @@ export class RemoteAccess {
         accessRequest?: { permission?: unknown; token?: unknown }
       }
       if (body.state !== 'COMPLETED') return undefined
+      if (st.servers[origin]?.href !== s.href) return st.servers[origin]?.token
       const ar = body.accessRequest
       if (ar?.permission === 'APPROVED' && typeof ar.token === 'string') {
         st.servers[origin] = { token: ar.token }
@@ -172,8 +187,18 @@ export class RemoteAccess {
    * Ask `server` for admin access, unless a request is already open.
    * True when one is open there now.
    */
-  async request(server: string): Promise<boolean> {
+  request(server: string): Promise<boolean> {
     const origin = originOf(server)
+    // A double connect must not file two requests there.
+    let p = this.asking.get(origin)
+    if (!p) {
+      p = this.ask(origin).finally(() => this.asking.delete(origin))
+      this.asking.set(origin, p)
+    }
+    return p
+  }
+
+  private async ask(origin: string): Promise<boolean> {
     const st = await this.load()
     // A token collected meanwhile is access already; a cached request is
     // checked first, since the server may have dropped or answered it.
@@ -213,14 +238,8 @@ export class RemoteAccess {
     await this.save()
   }
 
-  /**
-   * The browser displays on the Signal K server at `server`. `locked` is
-   * true when it refused to list them: the designer has no access there
-   * yet, and an admin here has to ask for it (`request`).
-   */
-  async displays(
-    server: string
-  ): Promise<{ displays: RemoteDisplay[]; locked: boolean }> {
+  /** The browser displays on the Signal K server at `server`. */
+  async displays(server: string): Promise<RemoteScan> {
     const origin = originOf(server)
     const token = await this.token(origin)
     let r: Response
@@ -229,19 +248,24 @@ export class RemoteAccess {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       })
     } catch {
-      return { displays: [], locked: false }
+      return { displays: [], status: 'failed' }
     }
     if (r.status === 401) {
       if (token) await this.forget(origin, token)
-      return { displays: [], locked: true }
+      return { displays: [], status: 'locked' }
     }
-    if (r.status === 403) return { displays: [], locked: token === undefined }
-    if (!r.ok) return { displays: [], locked: false }
+    if (r.status === 403) {
+      return { displays: [], status: token ? 'limited' : 'locked' }
+    }
+    // No signalk-espos-hmi there.
+    if (r.status === 404) return { displays: [], status: 'ok' }
+    if (!r.ok) return { displays: [], status: 'failed' }
     const body = (await r.json().catch(() => null)) as {
       displays?: unknown
     } | null
-    const list = Array.isArray(body?.displays) ? body.displays : []
-    const host = new URL(origin).host
+    if (!Array.isArray(body?.displays))
+      return { displays: [], status: 'failed' }
+    const list: unknown[] = body.displays
     const out: RemoteDisplay[] = []
     for (const d of list) {
       if (typeof d !== 'object' || d === null) continue
@@ -250,10 +274,10 @@ export class RemoteAccess {
       const label = typeof name === 'string' && name ? name : id
       out.push({
         url: `${origin}${HMI_DISPLAYS}/${encodeURIComponent(id)}`,
-        name: `${label} (browser display on ${host})`,
+        name: `${label} (browser display)`,
         txt: {}
       })
     }
-    return { displays: out, locked: false }
+    return { displays: out, status: 'ok' }
   }
 }
