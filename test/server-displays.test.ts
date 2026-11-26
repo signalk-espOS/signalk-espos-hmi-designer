@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   HMI_DISPLAYS,
+  fetchServerDisplays,
   isServerDisplay,
   matchDevice,
   normalizeDeviceUrl,
@@ -74,5 +75,35 @@ describe('browser displays in the picker', () => {
     expect(otherPanelUrl('http://cockpit.local')).toBe(
       'http://cockpit.local:8081'
     )
+  })
+})
+
+describe('fetchServerDisplays', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const answer = (status: number): void => {
+    vi.stubGlobal('location', { origin })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ displays: [] }), { status })
+        )
+      )
+    )
+  }
+
+  it('finds nothing where the plugin is absent or closed to this user', async () => {
+    for (const status of [401, 403, 404]) {
+      answer(status)
+      await expect(fetchServerDisplays()).resolves.toEqual([])
+    }
+  })
+
+  it('reports a server error instead of finding nothing', async () => {
+    answer(500)
+    await expect(fetchServerDisplays()).rejects.toThrow('500')
   })
 })

@@ -619,7 +619,10 @@ export async function fetchServerDisplays(): Promise<DiscoveredDevice[]> {
   const origin = currentOrigin()
   if (origin === undefined) return []
   const r = await fetch(HMI_DISPLAYS, { credentials: 'same-origin' })
-  if (!r.ok) return []
+  // Absent plugin or no read access is an empty source; a server error
+  // is a failure the scan has to report.
+  if (r.status === 401 || r.status === 403 || r.status === 404) return []
+  if (!r.ok) throw new Error(`browser display discovery failed: ${r.status}`)
   const body: unknown = await r.json().catch(() => null)
   return serverDisplayTargets(body, origin)
 }
