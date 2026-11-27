@@ -2,7 +2,21 @@ import type { Plugin, PluginRouter, ServerAPI } from '@signalk/server-api'
 import type { Request, Response } from 'express'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { Bonjour } from 'bonjour-service'
+import { Bonjour, type Service } from 'bonjour-service'
+import {
+  CertChangedError,
+  HMI_DISPLAYS,
+  RemoteAccess,
+  adminMessage,
+  approveMessage,
+  hmiOrigin,
+  localAddresses,
+  originOf,
+  type RemoteScan
+} from './remote.js'
+
+/** How long a scan waits for other servers to list their displays. */
+const REMOTE_SCAN_MS = 5000
 
 /** A cockpit panel found on the LAN via mDNS. */
 interface DiscoveredDevice {
@@ -48,6 +62,55 @@ interface ProxyBody {
 }
 
 /**
+ * The base URL of an mDNS answer. Prefers the .local name: it survives a
+ * DHCP lease change, whereas the address does not. Falls back to the
+ * first IPv4.
+ */
+function serviceHost(svc: Service): string | undefined {
+  return svc.host ?? svc.addresses?.find((a: string) => a.includes('.'))
+}
+
+function serviceUrl(
+  svc: Service,
+  scheme: 'http' | 'https' = 'http'
+): string | undefined {
+  const host = serviceHost(svc)
+  if (!host || !svc.port) return undefined
+  const name = host.replace(/\.$/, '')
+  const plain = scheme === 'http' ? 80 : 443
+  return svc.port === plain
+    ? `${scheme}://${name}`
+    : `${scheme}://${name}:${svc.port}`
+}
+
+/**
+ * Whether an mDNS answer is this host. Compared by address only: behind
+ * TLS, a reverse proxy or a port mapping the port a request arrives on
+ * need not be the one Signal K advertises.
+ */
+function isThisHost(svc: Service): boolean {
+  const mine = localAddresses()
+  return (svc.addresses ?? []).some((a: string) => mine.has(a))
+}
+
+/** `p`, or `fallback` once `ms` have passed. */
+function within<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve(fallback), ms)
+    p.then(
+      (v) => {
+        clearTimeout(t)
+        resolve(v)
+      },
+      () => {
+        clearTimeout(t)
+        resolve(fallback)
+      }
+    )
+  })
+}
+
+/**
  * SignalK plugin entry for the HMI Designer webapp.
  *
  * The plugin itself is mostly a thin shell: SignalK serves the
@@ -63,11 +126,12 @@ interface ProxyBody {
  *                            tripping browser CORS, and to GET /hello
  *                            for capability discovery.
  *
- * Device discovery (mDNS browse) happens client-side in the webapp via
- * the SK server's built-in /signalk/v1/discovery endpoint; we don't
- * need to mirror it here.
+ *   GET  /devices          — browses mDNS for panels, and for other
+ *                            Signal K servers whose signalk-espos-hmi
+ *                            displays the designer can push to.
  */
 const plugin = (app: ServerAPI): Plugin => {
+  const remote = new RemoteAccess(() => app.getDataDirPath())
   return {
     id: PLUGIN_ID,
     name: 'HMI Designer',
@@ -101,22 +165,33 @@ const plugin = (app: ServerAPI): Plugin => {
       readable.get('/devices', (_req: Request, res: Response) => {
         const bonjour = new Bonjour()
         const found = new Map<string, DiscoveredDevice>()
+        // Other Signal K servers on the LAN may run signalk-espos-hmi
+        // with displays of their own. A server with SSL on advertises both
+        // services under one instance name, and HTTPS keeps the
+        // designer's token off the wire; two servers on one host stay two.
+        const plain = new Map<string, string>()
+        const secure = new Map<string, string>()
+        const skBrowsers = (['http', 'https'] as const).map((scheme) => {
+          const b = bonjour.find({ type: `signalk-${scheme}`, protocol: 'tcp' })
+          b.on('up', (svc) => {
+            const url = serviceUrl(svc, scheme)
+            const host = serviceHost(svc)
+            if (!url || !host || isThisHost(svc)) return
+            const key = `${host}\n${svc.name ?? ''}`
+            ;(scheme === 'https' ? secure : plain).set(key, originOf(url))
+          })
+          return b
+        })
         const browser = bonjour.find({
           type: 'signalk-player',
           protocol: 'tcp'
         })
         browser.on('up', (svc) => {
-          // Prefer the .local name: it survives a DHCP lease change,
-          // whereas the address does not. Fall back to the first IPv4.
-          const host: string | undefined =
-            svc.host ?? svc.addresses?.find((a: string) => a.includes('.'))
-          if (!host || !svc.port) return
-          const name = host.replace(/\.$/, '')
-          const url =
-            svc.port === 80 ? `http://${name}` : `http://${name}:${svc.port}`
+          const url = serviceUrl(svc)
+          if (!url) return
           found.set(url, {
             url,
-            name: svc.name ?? host,
+            name: svc.name ?? serviceHost(svc) ?? url,
             txt: (svc.txt ?? {}) as Record<string, string>
           })
         })
@@ -124,8 +199,51 @@ const plugin = (app: ServerAPI): Plugin => {
         // then return whatever answered rather than holding the request.
         setTimeout(() => {
           browser.stop()
+          for (const b of skBrowsers) b.stop()
           bonjour.destroy()
-          res.json({ devices: [...found.values()] })
+          const servers = new Set(secure.values())
+          for (const [key, origin] of plain) {
+            if (!secure.has(key)) servers.add(origin)
+          }
+          if (servers.size === 0) {
+            res.json({ devices: [...found.values()] })
+            return
+          }
+          // A slow or broken server must not hold back what answered.
+          void Promise.all(
+            [...servers].map(async (origin) => ({
+              origin,
+              ...(await within<RemoteScan>(
+                remote.displays(origin),
+                REMOTE_SCAN_MS,
+                { displays: [], status: 'failed' }
+              ))
+            }))
+          ).then((answers) => {
+            const devices = [...found.values()]
+            const limited: string[] = []
+            const failed: string[] = []
+            for (const a of answers) {
+              devices.push(...a.displays)
+              // Asking a server for admin is the user's call, not the
+              // scan's: in a marina the LAN is shared with other boats.
+              // Connecting to this entry asks (see /device-proxy).
+              if (a.status === 'locked') {
+                devices.push({
+                  url: `${a.origin}${HMI_DISPLAYS}`,
+                  name: 'Signal K server: connect to ask for access',
+                  txt: {}
+                })
+              }
+              if (a.status === 'limited') limited.push(a.origin)
+              if (a.status === 'failed') failed.push(a.origin)
+            }
+            res.json({
+              devices,
+              ...(limited.length ? { limited } : {}),
+              ...(failed.length ? { failed } : {})
+            })
+          })
         }, 1500)
       })
 
@@ -243,7 +361,11 @@ const plugin = (app: ServerAPI): Plugin => {
           const t = setTimeout(() => controller.abort(), 30_000)
           init.signal = controller.signal
           let upstream: globalThis.Response | undefined
-          const broker = esposBroker()
+          // A browser display on another Signal K server: the designer's
+          // own access there, not the panel broker.
+          const hmi = hmiOrigin(url)
+          const token = hmi ? await remote.token(hmi) : undefined
+          const broker = hmi ? undefined : esposBroker()
           if (broker) {
             try {
               upstream = await broker.request(url, {
@@ -260,7 +382,42 @@ const plugin = (app: ServerAPI): Plugin => {
               app.debug(`espos-manager could not send ${url}: ${msg}`)
             }
           }
+          if (hmi) {
+            try {
+              upstream = await remote.fetch(url, init, { auth: true })
+            } catch (err) {
+              if (!(err instanceof CertChangedError)) throw err
+              clearTimeout(t)
+              // The access there is gone; ask the server as it is now.
+              const asked = await remote.request(hmi)
+              res.status(401).json({
+                error: asked
+                  ? `${err.message}: ${approveMessage(hmi)}`
+                  : err.message
+              })
+              return
+            }
+          }
           upstream ??= await fetch(url, init)
+          if (hmi && (upstream.status === 401 || upstream.status === 403)) {
+            clearTimeout(t)
+            // The refusal's body is not read: release the connection.
+            controller.abort()
+            // A token that works but carries too little: asking again
+            // would only pile up requests there.
+            if (token && upstream.status === 403) {
+              res.status(403).json({ error: adminMessage(hmi) })
+              return
+            }
+            if (token) await remote.forget(hmi, token)
+            const asked = await remote.request(hmi)
+            res.status(401).json({
+              error: asked
+                ? approveMessage(hmi)
+                : `${new URL(hmi).host} refused this (${upstream.status})`
+            })
+            return
+          }
           // Read as a Buffer so binary responses (BMP screenshots etc)
           // pass through unmangled. The timeout covers the body too: a
           // screenshot can stall after its headers.

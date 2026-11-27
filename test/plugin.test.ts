@@ -23,12 +23,16 @@ const mdns = vi.hoisted(() => {
       for (const cb of this.up) cb(svc)
     }
   }
-  const instances: Array<{ browser: FakeBrowser; destroy: () => void }> = []
+  const instances: Array<{
+    type: string
+    browser: FakeBrowser
+    destroy: () => void
+  }> = []
   class Bonjour {
     destroy = vi.fn()
-    find(): FakeBrowser {
+    find(opts: { type: string }): FakeBrowser {
       const browser = new FakeBrowser()
-      instances.push({ browser, destroy: this.destroy })
+      instances.push({ type: opts.type, browser, destroy: this.destroy })
       return browser
     }
   }
@@ -408,6 +412,46 @@ describe('POST /device-proxy', () => {
   })
 })
 
+describe('POST /device-proxy to another Signal K server', () => {
+  it("answers in the designer's words when that server refuses", async () => {
+    const remote = await upstream({ status: 401, body: '{}' })
+    cleanups.push(remote.close)
+    mounted = await mount(dataDir)
+    const r = await proxy(mounted.base, {
+      url: `${remote.url}/plugins/signalk-espos-hmi/displays/salon/hello`
+    })
+    expect(r.status).toBe(401)
+    const host = new URL(remote.url).host
+    expect(await r.json()).toEqual({ error: `${host} refused this (401)` })
+    expect(remote.seen.map((s) => `${s.method} ${s.url}`)).toEqual([
+      'GET /plugins/signalk-espos-hmi/displays/salon/hello',
+      'POST /signalk/v1/access/requests'
+    ])
+  })
+
+  it('sends its token there, and keeps one that is only short of admin', async () => {
+    const remote = await upstream({ status: 403, body: '{}' })
+    cleanups.push(remote.close)
+    await fs.writeFile(
+      path.join(dataDir, 'remote-access.json'),
+      JSON.stringify({
+        clientId: 'c',
+        servers: { [remote.url]: { token: 'tok' } }
+      })
+    )
+    mounted = await mount(dataDir)
+    const r = await proxy(mounted.base, {
+      url: `${remote.url}/plugins/signalk-espos-hmi/displays/salon/layout`,
+      method: 'POST',
+      body: {}
+    })
+    expect(r.status).toBe(403)
+    expect(((await r.json()) as { error: string }).error).toContain('admin')
+    expect(remote.seen).toHaveLength(1)
+    expect(remote.seen[0]?.headers.authorization).toBe('Bearer tok')
+  })
+})
+
 describe('POST /device-proxy through signalk-espos-manager', () => {
   const g = globalThis as { __signalk_esposManager?: unknown }
   afterEach(() => {
@@ -500,10 +544,12 @@ describe('GET /devices', () => {
   interface Browse {
     sink: ReturnType<typeof jsonSink>
     browser: (typeof mdns.instances)[number]['browser']
+    servers: (typeof mdns.instances)[number]['browser']
+    secure: (typeof mdns.instances)[number]['browser']
     destroy: () => void
   }
 
-  /** Start a /devices request against the fake mDNS and hand back the browser. */
+  /** Start a /devices request against the fake mDNS and hand back the browsers. */
   function browse(): Browse {
     const { router, routes } = captureRoutes()
     const p = plugin(fakeApp(dataDir).app)
@@ -514,9 +560,18 @@ describe('GET /devices', () => {
     if (!handler) throw new Error('GET /devices not registered')
     const sink = jsonSink()
     void handler({} as Request, sink.res)
-    const inst = mdns.instances.at(-1)
-    if (!inst) throw new Error('route did not open an mDNS browser')
-    return { sink, browser: inst.browser, destroy: inst.destroy }
+    const inst = mdns.instances.find((i) => i.type === 'signalk-player')
+    const sk = mdns.instances.find((i) => i.type === 'signalk-http')
+    const sks = mdns.instances.find((i) => i.type === 'signalk-https')
+    if (!inst || !sk || !sks)
+      throw new Error('route did not open every mDNS browser')
+    return {
+      sink,
+      browser: inst.browser,
+      servers: sk.browser,
+      secure: sks.browser,
+      destroy: inst.destroy
+    }
   }
 
   const svc = (partial: Partial<Service>): Service => partial as Service
@@ -587,13 +642,116 @@ describe('GET /devices', () => {
   })
 
   it('stops browsing and tears the instance down after the window', async () => {
-    const { browser, destroy } = browse()
+    const { browser, servers, secure, destroy } = browse()
     await vi.advanceTimersByTimeAsync(1499)
     expect(browser.stop).not.toHaveBeenCalled()
     expect(destroy).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(browser.stop).toHaveBeenCalledTimes(1)
+    expect(servers.stop).toHaveBeenCalledTimes(1)
+    expect(secure.stop).toHaveBeenCalledTimes(1)
     expect(destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it("adds another server's browser displays", async () => {
+    const remote = await upstream({
+      contentType: 'application/json',
+      body: JSON.stringify({ displays: [{ id: 'salon', name: 'Salon' }] })
+    })
+    cleanups.push(remote.close)
+    const port = Number(new URL(remote.url).port)
+    const { sink, servers } = browse()
+    // Named by host, with an address that is not this machine's.
+    servers.emitUp(
+      svc({ name: 'boat2', host: 'localhost', addresses: ['192.0.2.7'], port })
+    )
+    await vi.advanceTimersByTimeAsync(1500)
+    await vi.waitFor(() => expect(sink.calls()).toBe(1))
+    expect(sink.payload()).toEqual({
+      devices: [
+        {
+          url: `http://localhost:${port}/plugins/signalk-espos-hmi/displays/salon`,
+          name: `Salon (browser display)`,
+          txt: {}
+        }
+      ]
+    })
+    expect(remote.seen[0]?.url).toBe('/plugins/signalk-espos-hmi/displays')
+  })
+
+  it('names a server that answered with an error', async () => {
+    const remote = await upstream({ status: 500, body: '{}' })
+    cleanups.push(remote.close)
+    const port = Number(new URL(remote.url).port)
+    const { sink, servers } = browse()
+    servers.emitUp(
+      svc({ name: 'boat2', host: 'localhost', addresses: ['192.0.2.7'], port })
+    )
+    await vi.advanceTimersByTimeAsync(1500)
+    await vi.waitFor(() => expect(sink.calls()).toBe(1))
+    expect(sink.payload()).toEqual({
+      devices: [],
+      failed: [`http://localhost:${port}`]
+    })
+  })
+
+  it('offers a server that wants a login as an entry, without asking it', async () => {
+    const remote = await upstream({ status: 401, body: '{}' })
+    cleanups.push(remote.close)
+    const port = Number(new URL(remote.url).port)
+    const { sink, servers } = browse()
+    servers.emitUp(
+      svc({ name: 'boat2', host: 'localhost', addresses: ['192.0.2.7'], port })
+    )
+    await vi.advanceTimersByTimeAsync(1500)
+    await vi.waitFor(() => expect(sink.calls()).toBe(1))
+    expect(sink.payload()).toEqual({
+      devices: [
+        {
+          url: `http://localhost:${port}/plugins/signalk-espos-hmi/displays`,
+          name: 'Signal K server: connect to ask for access',
+          txt: {}
+        }
+      ]
+    })
+    expect(remote.seen.map((r) => r.method)).toEqual(['GET'])
+  })
+
+  it('reaches a server over HTTPS when it offers both', async () => {
+    const { sink, servers, secure } = browse()
+    const boat2 = { name: 'boat2', host: 'localhost', addresses: ['192.0.2.7'] }
+    // Port 9 (discard) answers nothing, so the scan names what it tried.
+    servers.emitUp(svc({ ...boat2, port: 9 }))
+    secure.emitUp(svc({ ...boat2, port: 9 }))
+    servers.emitUp(svc({ ...boat2, port: 9 }))
+    await vi.advanceTimersByTimeAsync(1500)
+    await vi.waitFor(() => expect(sink.calls()).toBe(1))
+    expect(sink.payload()).toEqual({
+      devices: [],
+      failed: ['https://localhost:9']
+    })
+  })
+
+  it('keeps two servers on one host apart', async () => {
+    const { sink, servers, secure } = browse()
+    const host = { host: 'localhost', addresses: ['192.0.2.7'] }
+    servers.emitUp(svc({ ...host, name: 'boat2', port: 9 }))
+    servers.emitUp(svc({ ...host, name: 'test', port: 7 }))
+    secure.emitUp(svc({ ...host, name: 'test', port: 9 }))
+    await vi.advanceTimersByTimeAsync(1500)
+    await vi.waitFor(() => expect(sink.calls()).toBe(1))
+    const failed = (sink.payload() as { failed?: string[] }).failed
+    expect([...(failed ?? [])].sort()).toEqual([
+      'http://localhost:9',
+      'https://localhost:9'
+    ])
+  })
+
+  it('leaves this server out', async () => {
+    const { sink, servers } = browse()
+    servers.emitUp(svc({ name: 'me', addresses: ['127.0.0.1'], port: 3000 }))
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(sink.payload()).toEqual({ devices: [] })
   })
 })
 
