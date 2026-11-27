@@ -350,7 +350,12 @@ export class RemoteAccess {
     let r: Response
     try {
       r = await this.timed(`${origin}${HMI_DISPLAYS}`, {}, { auth: true })
-    } catch {
+    } catch (err) {
+      // A changed certificate is a server to connect to again, which is
+      // what accepts the new one; the scan itself sends nothing there.
+      if (err instanceof CertChangedError) {
+        return { displays: [], status: 'locked' }
+      }
       return { displays: [], status: 'failed' }
     }
     if (r.status === 401) {

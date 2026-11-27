@@ -396,9 +396,10 @@ describe('RemoteAccess over HTTPS', () => {
     expect(seen).toHaveLength(sent)
     expect(await ra.token(SECURE)).toBeUndefined()
 
-    // The old pin survives a restart: the scan sends nothing either.
+    // The old pin survives a restart; the scan offers a reconnect and
+    // sends nothing there.
     const again = new RemoteAccess(() => dataDir, fetchFn, pinned)
-    expect((await again.displays(SECURE)).status).toBe('failed')
+    expect((await again.displays(SECURE)).status).toBe('locked')
     expect(seen).toHaveLength(sent)
   })
 
