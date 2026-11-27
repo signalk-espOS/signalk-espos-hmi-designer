@@ -36,6 +36,7 @@ Toggle with the **Preview / Mirror** switch in the toolbar (in the menu on a nar
 - **Zone-aware coloring** — paths whose SK metadata declares `zones` colorize widgets per state (nominal / alert / warn / alarm / emergency, maritime-helm palette). The firmware fetches zone meta over REST per path on push, so even paths SK doesn't broadcast meta for still get the right colors.
 - **Alert overlay** in the menu — opts the device's alert overlay in/out, picks the `min_state` threshold.
 - **Display power save** in the menu — idle-backlight timeout and dim-to brightness (gated on `/hello.display.idle_timeout`). Higher dim levels keep tap-wake working; lower levels need notifications or a fresh push to wake the panel.
+- **Voice control** in the menu — whether the panel runs its voice satellite, with the wake word or push-to-talk only (gated on `/hello.voice_config`). Off, the panel does not listen at all. A layout that leaves it unset gets voice when it has a talk button or a mic switch.
 
 ## Widget kinds
 

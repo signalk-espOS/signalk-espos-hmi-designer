@@ -370,7 +370,41 @@ export interface Layout {
   notifications?: NotificationsConfig
   /** Backlight power-save settings. */
   display?: LayoutDisplayConfig
+  /** The panel's voice satellite. Push only to a device that reports
+   *  `/hello.voice_config`. */
+  voice?: LayoutVoiceConfig
   screens: Screen[]
+}
+
+/** Whether the panel runs its voice satellite, and with the wake word. */
+export interface LayoutVoiceConfig {
+  /** Run the satellite: a voice orchestrator can connect, speak through
+   *  the panel and take push-to-talk. Off, nothing listens. Omitted, the
+   *  panel turns it on when the layout has one of `MIC_KINDS`. */
+  enabled?: boolean
+  /** Listen for the wake word as well. Default true; false leaves
+   *  push-to-talk only. */
+  wake?: boolean
+}
+
+/** The kinds that need the satellite: a talk button and a mic switch
+ *  (`mute_mic` is the firmware's old name for `mic`). */
+export const MIC_KINDS: readonly string[] = ['voice', 'mic', 'mute_mic']
+
+/** What the panel makes of a layout's `voice` object, defaults included.
+ *  The firmware applies the same rule (layout_manager.cpp). */
+export function effectiveVoice(layout: Pick<Layout, 'voice' | 'screens'>): {
+  enabled: boolean
+  wake: boolean
+} {
+  const v = layout.voice
+  const enabled =
+    typeof v?.enabled === 'boolean'
+      ? v.enabled
+      : layout.screens.some((s) =>
+          s.widgets.some((w) => MIC_KINDS.includes(w.type))
+        )
+  return { enabled, wake: typeof v?.wake === 'boolean' ? v.wake : true }
 }
 
 /** Layout-level display chrome. Distinct from the per-widget
@@ -509,6 +543,9 @@ export interface HelloResponse {
   widgets: Record<string, { fields: string[] }>
   active_layout_name?: string
   layout_source?: string
+  /** What the panel's active layout made of `voice`, defaults included.
+   *  Absent on firmware that does not take the object. */
+  voice_config?: { enabled: boolean; wake: boolean }
 }
 
 /** The panel's color themes. `auto` follows SignalK `environment.mode`:

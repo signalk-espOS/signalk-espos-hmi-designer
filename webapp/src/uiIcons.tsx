@@ -49,6 +49,12 @@ export const UI_ICONS = {
       <path d="M9 20h6M12 16.5V20" />
     </>
   ),
+  mic: icon(
+    <>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M6 11a6 6 0 0 0 12 0M12 17v4" />
+    </>
+  ),
   grip: icon(
     <path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" />
   ),

@@ -56,7 +56,9 @@ import {
 import { useNotifications, useSkValues } from './skStream'
 import {
   DEFAULT_TAB_STRIP_HEIGHT,
+  effectiveVoice,
   IDLE_DIM_PRESETS,
+  MIC_KINDS,
   IDLE_TIMEOUT_PRESETS,
   MIN_DEVICE_FIRMWARE,
   parseFirmwareVersion,
@@ -565,6 +567,10 @@ export function App(): React.JSX.Element {
     Layout['display'] | undefined
   >(undefined)
   const [showDisplayModal, setShowDisplayModal] = useState<boolean>(false)
+  const [voiceConfig, setVoiceConfig] = useState<Layout['voice'] | undefined>(
+    undefined
+  )
+  const [showVoiceModal, setShowVoiceModal] = useState<boolean>(false)
   const [themeConfig, setThemeConfig] = useState<Layout['theme'] | undefined>(
     undefined
   )
@@ -767,6 +773,7 @@ export function App(): React.JSX.Element {
       ...(notifConfig ? { notifications: notifConfig } : {}),
       ...(displayConfig ? { display: displayConfig } : {}),
       ...(themeConfig ? { theme: themeConfig } : {}),
+      ...(voiceConfig ? { voice: voiceConfig } : {}),
       screens
     }),
     [
@@ -776,8 +783,15 @@ export function App(): React.JSX.Element {
       tabStripHeightCfg,
       notifConfig,
       displayConfig,
-      themeConfig
+      themeConfig,
+      voiceConfig
     ]
+  )
+  const layoutVoice = useMemo(() => effectiveVoice(layoutDoc), [layoutDoc])
+  const layoutHasMicWidget = useMemo(
+    () =>
+      screens.some((s) => s.widgets.some((w) => MIC_KINDS.includes(w.type))),
+    [screens]
   )
 
   // Canvas dimensions track the connected device's /hello.display
@@ -1612,6 +1626,7 @@ export function App(): React.JSX.Element {
     setNotifConfig(l.notifications)
     setDisplayConfig(l.display)
     setThemeConfig(l.theme)
+    setVoiceConfig(l.voice)
     hydrateLayoutMeta(l, paths)
   }
   // Expose adoptLayout to the boot-restore effect via the ref. The
@@ -2329,6 +2344,19 @@ export function App(): React.JSX.Element {
                 Display power save
               </button>
             )}
+            {hello?.voice_config && (
+              <button
+                type="button"
+                className="pop-item"
+                onClick={() => {
+                  setMenuOpen(false)
+                  setShowVoiceModal(true)
+                }}
+              >
+                {UI_ICONS.mic}
+                Voice control
+              </button>
+            )}
             <hr />
             <div className="pop-group">View</div>
             <div className="pop-row narrow-only">
@@ -2884,6 +2912,79 @@ export function App(): React.JSX.Element {
             </p>
             <div className="modal-actions">
               <button onClick={() => setShowDisplayModal(false)}>done</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showVoiceModal && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setShowVoiceModal(false)}
+        >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Voice control</h3>
+            <p className="muted small">
+              Lets a voice orchestrator (signalk-wyoming, Home Assistant) use
+              the panel's microphone and speaker: push-to-talk with a talk
+              button, spoken replies, and the wake word. Off, the panel does not
+              listen at all. Alert chimes sound either way.
+            </p>
+            <label className="pop-row">
+              <span>Voice control</span>
+              <input
+                type="checkbox"
+                className="switch"
+                checked={layoutVoice.enabled}
+                onChange={(e) =>
+                  setVoiceConfig({
+                    enabled: e.target.checked,
+                    wake: layoutVoice.wake
+                  })
+                }
+              />
+            </label>
+            <label className="pop-row">
+              <span>Listen for the wake word</span>
+              <input
+                type="checkbox"
+                className="switch"
+                checked={layoutVoice.wake}
+                disabled={!layoutVoice.enabled}
+                onChange={(e) =>
+                  setVoiceConfig({
+                    enabled: layoutVoice.enabled,
+                    wake: e.target.checked
+                  })
+                }
+              />
+            </label>
+            {voiceConfig?.enabled === undefined && (
+              <p className="muted small">
+                {layoutVoice.enabled
+                  ? 'Not set in this layout: on, because the layout has a talk button or a mic switch.'
+                  : 'Not set in this layout: off, because the layout has no talk button or mic switch.'}
+              </p>
+            )}
+            {!layoutVoice.enabled && layoutHasMicWidget && (
+              <p className="muted small">
+                With voice control off, the talk buttons and mic switches in
+                this layout do nothing.
+              </p>
+            )}
+            {hello?.voice_config && (
+              <p className="muted small">
+                When the designer connected, the panel ran voice control{' '}
+                {hello.voice_config.enabled
+                  ? hello.voice_config.wake
+                    ? 'on, with the wake word'
+                    : 'on, push-to-talk only'
+                  : 'off'}
+                .
+              </p>
+            )}
+            <div className="modal-actions">
+              <button onClick={() => setShowVoiceModal(false)}>done</button>
             </div>
           </div>
         </div>
