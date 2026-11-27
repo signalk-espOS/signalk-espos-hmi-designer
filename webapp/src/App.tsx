@@ -1831,8 +1831,22 @@ export function App(): React.JSX.Element {
       )
       return
     }
+    // Whether the panel takes `voice` has to come from the panel being
+    // pushed to. One that does not report voice_config runs its voice
+    // regardless of the layout, so the object is left out of its copy
+    // rather than refusing the push: the rest of the layout still applies.
+    if (layoutDoc.voice && (!hello || connectedUrl !== deviceUrl)) {
+      setPushErr(
+        'Connect to this panel first: the layout sets voice control, ' +
+          'which only a panel that reports it can take.'
+      )
+      return
+    }
+    const payload: Layout = hello?.voice_config
+      ? layoutDoc
+      : { ...layoutDoc, voice: undefined }
     try {
-      const r = await pushLayout(deviceUrl, layoutDoc)
+      const r = await pushLayout(deviceUrl, payload)
       setPushResult(r)
       // Persist on successful device push (not on validation failure).
       // Save errors are non-fatal — surface but don't overwrite the
