@@ -56,3 +56,45 @@ export function NumberField(props: {
     />
   )
 }
+
+/** A NumberField that may be left empty: empty is undefined. */
+export function OptionalNumberField(props: {
+  value: number | undefined
+  onChange: (v: number | undefined) => void
+  placeholder?: string
+}): React.JSX.Element {
+  const show = (v: number | undefined): string =>
+    v === undefined ? '' : String(v)
+  const [draft, setDraft] = useState<string>(show(props.value))
+  const lastCommitted = useRef<number | undefined>(props.value)
+  useEffect(() => {
+    if (props.value === lastCommitted.current) return
+    lastCommitted.current = props.value
+    setDraft(show(props.value))
+  }, [props.value])
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      placeholder={props.placeholder ?? 'auto'}
+      onChange={(e) => {
+        const txt = e.target.value
+        setDraft(txt)
+        if (txt.trim() === '') {
+          lastCommitted.current = undefined
+          props.onChange(undefined)
+          return
+        }
+        const n = Number(txt)
+        if (!Number.isFinite(n)) return
+        lastCommitted.current = n
+        props.onChange(n)
+      }}
+      onBlur={() => {
+        lastCommitted.current = props.value
+        setDraft(show(props.value))
+      }}
+    />
+  )
+}

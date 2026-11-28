@@ -41,6 +41,8 @@ interface JlpWasmModule extends ResizableWasm {
   _jlp_set_notifications: (snapshotJsonPtr: number) => void
   /** Missing from bundles built before the panel themes. */
   _jlp_set_theme?: (modePtr: number) => number
+  /** The kinds and fields this bundle renders; missing from old ones. */
+  _jlp_widget_catalog?: () => number
   _malloc: (n: number) => number
   _free: (p: number) => void
   stringToUTF8: (str: string, ptr: number, maxBytes: number) => void
@@ -52,6 +54,24 @@ interface JlpWasmModule extends ResizableWasm {
 // one canvas binding). Re-mounting the component just re-points the
 // canvas; we don't tear LVGL down between mounts.
 let modulePromise: Promise<JlpWasmModule> | null = null
+let bundleKinds: ReadonlySet<string> | null | undefined
+
+/** The kinds the loaded bundle renders, or null when it cannot say. */
+function rendererKinds(mod: JlpWasmModule): ReadonlySet<string> | null {
+  if (bundleKinds !== undefined) return bundleKinds
+  bundleKinds = null
+  const cat = mod._jlp_widget_catalog
+  if (cat) {
+    try {
+      const parsed: unknown = JSON.parse(mod.UTF8ToString(cat()))
+      if (parsed && typeof parsed === 'object')
+        bundleKinds = new Set(Object.keys(parsed))
+    } catch {
+      bundleKinds = null
+    }
+  }
+  return bundleKinds
+}
 let currentCanvas: HTMLCanvasElement | null = null
 let inited = false
 // The LVGL display size, from jlp_init and every jlp_resize since.
@@ -345,13 +365,14 @@ export function WasmCanvas({
     pushAllMeta(modReady, pathZones, pathDescriptions)
     pushNotifications(modReady, notifications)
     // A stream widget cannot render here: its content is a live MJPEG
-    // pull the preview has no business making (and one unknown kind
-    // would abort the whole wasm apply). Substitute a same-geometry
-    // static label so the rest of the screen still previews true.
+    // pull the preview has no business making. A kind the bundle predates
+    // would abort the whole wasm apply. Either gets a same-geometry static
+    // label so the rest of the screen still previews true.
+    const kinds = rendererKinds(modReady)
     const previewScreen: Screen = {
       ...screen,
       widgets: screen.widgets.map((w) =>
-        w.type === 'stream'
+        w.type === 'stream' || (kinds && !kinds.has(w.type))
           ? {
               id: w.id,
               type: 'label' as const,
@@ -359,7 +380,10 @@ export function WasmCanvas({
               y: w.y,
               w: w.w,
               h: w.h,
-              label: 'stream — live on the panel only',
+              label:
+                w.type === 'stream'
+                  ? 'stream — live on the panel only'
+                  : `${w.type} — preview needs a newer renderer`,
               bg_color: w.bg_color,
               fg_color: w.fg_color
             }
