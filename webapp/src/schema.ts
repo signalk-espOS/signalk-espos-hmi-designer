@@ -22,6 +22,11 @@ export type WidgetKind =
   | 'volume'
   | 'stream'
   | 'slider'
+  | 'wind'
+  | 'compass'
+  | 'heel'
+  | 'performance'
+  | 'rudder'
 
 export interface DisplayConfig {
   unit?: string
@@ -283,6 +288,52 @@ export interface SliderWidget extends WidgetCommon {
   display?: DisplayConfig
 }
 
+/** Wind instrument: apparent wind pointer, hollow true wind marker, AWS
+ *  in the centre, close-hauled sectors. No `bind`: it owns
+ *  environment.wind.angleApparent / speedApparent / angleTrueWater /
+ *  speedTrue and, with `target_angle`, performance.targetAngle.
+ *  `display` sets the speed unit (knots by default). */
+export interface WindWidget extends WidgetCommon {
+  type: 'wind'
+  /** `close` spreads ±60° over the dial for upwind work. */
+  range?: 'full' | 'close'
+  /** The true wind marker and TWS readout (device default true). */
+  true_wind?: boolean
+  /** A dot at the target TWA for the best VMG, on the current tack. */
+  target_angle?: boolean
+}
+
+export type CompassMarker = 'cog' | 'waypoint' | 'wind'
+
+/** Compass rose turning under a fixed lubber mark. No `bind`: the
+ *  heading, COG, waypoint bearing and wind direction paths follow
+ *  `heading_ref`. */
+export interface CompassWidget extends WidgetCommon {
+  type: 'compass'
+  heading_ref?: 'magnetic' | 'true'
+  /** Device default: cog and waypoint. */
+  markers?: CompassMarker[]
+}
+
+/** Heel and trim from navigation.attitude (roll, pitch). */
+export interface HeelWidget extends WidgetCommon {
+  type: 'heel'
+  /** Degrees from which the scale is drawn orange (device default 25). */
+  warn_heel?: number
+}
+
+/** Speed through water against performance.polarSpeed, with VMG. */
+export interface PerformanceWidget extends WidgetCommon {
+  type: 'performance'
+}
+
+/** Rudder angle from steering.rudderAngle. */
+export interface RudderWidget extends WidgetCommon {
+  type: 'rudder'
+  /** Degrees at the ends of the scale (device default 40). */
+  max?: number
+}
+
 export type Widget =
   | LabelWidget
   | ValueWidget
@@ -300,6 +351,11 @@ export type Widget =
   | VolumeWidget
   | StreamWidget
   | SliderWidget
+  | WindWidget
+  | CompassWidget
+  | HeelWidget
+  | PerformanceWidget
+  | RudderWidget
 
 export interface Screen {
   id: string
