@@ -35,7 +35,7 @@ import { Popover } from './Popover'
 import { fitTabs } from './fitTabs'
 import { formatPathValue, type PathInfo } from './pathSearch'
 import { UI_ICONS } from './uiIcons'
-import { bindsOf } from './widgetBinds'
+import { bindsOf, fixedSourcesOf } from './widgetBinds'
 import { WidgetSheet, kindHasData, type SheetTab } from './WidgetSheet'
 import { KIND_INFO, kindMatches } from './widgetIcons'
 import {
@@ -268,6 +268,24 @@ function defaultWidget(
         label: '',
         display: { unit: 'm', scale: 1, offset: 0, decimals: 1 }
       }
+    // The sailing instruments own their paths. Square dials; heel and
+    // rudder are wider than tall.
+    case 'wind':
+      return { ...base, type: 'wind', w: 300, h: 300, label: 'Wind' }
+    case 'compass':
+      return { ...base, type: 'compass', w: 300, h: 300, label: 'Heading' }
+    case 'heel':
+      return { ...base, type: 'heel', w: 300, h: 220, label: 'Heel' }
+    case 'performance':
+      return {
+        ...base,
+        type: 'performance',
+        w: 300,
+        h: 300,
+        label: 'Performance'
+      }
+    case 'rudder':
+      return { ...base, type: 'rudder', w: 300, h: 220, label: 'Rudder' }
     // The four voice widgets are panel-local: no bind, no SignalK. Sized like
     // the switch tiles they resemble; the device supplies its own caption
     // (TALK / SPEAKER / MIC / VOLUME) when label is empty.
@@ -870,11 +888,32 @@ export function App(): React.JSX.Element {
   // the set of bound paths changes. Includes top-level widget binds
   // AND sub-bar binds inside bargroup widgets so per-bar tinting and
   // value display work in the canvas preview.
+  // The sailing instruments read fixed paths, subscribed alongside.
+  const fixedSources = useMemo(
+    () => screens.flatMap((s) => s.widgets.flatMap(fixedSourcesOf)),
+    [screens]
+  )
   const boundPaths = useMemo(
     () => screens.flatMap((s) => s.widgets.flatMap(bindsOf)),
     [screens]
   )
-  const skValues = useSkValues(boundPaths, paths)
+  const subscribedPaths = useMemo(
+    () => [...boundPaths, ...fixedSources.map((f) => f.bind)],
+    [boundPaths, fixedSources]
+  )
+  const liveValues = useSkValues(subscribedPaths, paths)
+  // A field of an object value reaches the preview under the panel's
+  // name for it (navigation.attitude#roll).
+  const skValues = useMemo(() => {
+    const renamed = fixedSources.filter((f) => f.key !== f.bind)
+    if (renamed.length === 0) return liveValues
+    const next = new Map(liveValues)
+    for (const f of renamed) {
+      const v = liveValues.get(f.bind)
+      if (v !== undefined) next.set(f.key, v)
+    }
+    return next
+  }, [liveValues, fixedSources])
   // A slider bound to @brightness shows this panel's backlight, which is
   // not a SignalK path: feed the preview the level read from the
   // connected panel, so the knob sits where the panel's does.
@@ -1882,7 +1921,12 @@ export function App(): React.JSX.Element {
         'mic',
         'volume',
         'stream',
-        'slider'
+        'slider',
+        'wind',
+        'compass',
+        'heel',
+        'performance',
+        'rudder'
       ]
     return Object.keys(hello.widgets).filter(
       (k): k is WidgetKind =>
@@ -1901,7 +1945,12 @@ export function App(): React.JSX.Element {
         k === 'mic' ||
         k === 'volume' ||
         k === 'stream' ||
-        k === 'slider'
+        k === 'slider' ||
+        k === 'wind' ||
+        k === 'compass' ||
+        k === 'heel' ||
+        k === 'performance' ||
+        k === 'rudder'
     )
   }, [hello])
 
@@ -2034,7 +2083,9 @@ export function App(): React.JSX.Element {
     if (!bind) return undefined
     const info = pathInfoByPath.get(bind)
     const v = skValues.has(bind) ? skValues.get(bind) : info?.value
-    return formatPathValue(v, info?.units)
+    const units =
+      info?.units ?? fixedSources.find((f) => f.bind === bind)?.units
+    return formatPathValue(v, units)
   }
 
   const openWidget = (w: Widget): void => {

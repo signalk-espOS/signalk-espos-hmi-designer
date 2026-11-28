@@ -3,9 +3,19 @@ import { colorForZoneState, isNestedBind, type MetaZone } from './api'
 import { NumberField } from './NumberField'
 import { PathPicker } from './PathPicker'
 import type { PathInfo } from './pathSearch'
-import type { FontSizeOption, Widget, WidgetKind } from './schema'
+import type {
+  CompassMarker,
+  FontSizeOption,
+  Widget,
+  WidgetKind
+} from './schema'
 import { UI_ICONS } from './uiIcons'
-import { bindsOf, PANEL_LOCAL_KINDS } from './widgetBinds'
+import {
+  bindsOf,
+  fixedSourcesOf,
+  PANEL_LOCAL_KINDS,
+  SAIL_KINDS
+} from './widgetBinds'
 import { KIND_INFO } from './widgetIcons'
 
 export type SheetTab = 'data' | 'display' | 'colors' | 'layout'
@@ -22,6 +32,16 @@ const TABS: ReadonlyArray<{ id: SheetTab; label: string }> = [
 export function kindHasData(kind: WidgetKind): boolean {
   return !PANEL_LOCAL_KINDS.has(kind) || kind === 'stream'
 }
+
+const KNOTS_PER_MS = 1.943844
+/** The heel dial's end, where the panel clamps `warn_heel`. */
+const HEEL_SCALE_DEG = 40
+
+const COMPASS_MARKERS: ReadonlyArray<{ id: CompassMarker; label: string }> = [
+  { id: 'cog', label: 'COG marker' },
+  { id: 'waypoint', label: 'waypoint marker' },
+  { id: 'wind', label: 'wind marker' }
+]
 
 /** A typed position or size as whole device pixels inside the panel. */
 function clampPx(n: number, min: number, max: number): number {
@@ -129,6 +149,7 @@ export function WidgetSheet(props: {
                 path that silently does nothing. */}
             {selected.type !== 'stream' &&
               !PANEL_LOCAL_KINDS.has(selected.type) &&
+              !SAIL_KINDS.has(selected.type) &&
               selected.type !== 'bargroup' && (
                 <div className="field">
                   <span className="field-label">Signal K path</span>
@@ -142,6 +163,23 @@ export function WidgetSheet(props: {
                   />
                 </div>
               )}
+            {SAIL_KINDS.has(selected.type) && (
+              <div className="field">
+                <span className="field-label">Signal K paths</span>
+                <p className="muted small">
+                  This instrument reads its own paths; the Display tab picks
+                  which ones.
+                </p>
+                <ul className="zones">
+                  {fixedSourcesOf(selected).map((s) => (
+                    <li key={s.key}>
+                      <span>{s.bind}</span>
+                      <span className="muted">{liveValue(s.bind) ?? '—'}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {selected.type === 'slider' && selected.bind === '@brightness' && (
               <p className="muted">
                 panel backlight, 5 to 100 %: the same setting as the brightness
@@ -690,6 +728,171 @@ export function WidgetSheet(props: {
                 </label>
               </>
             )}
+            {selected.type === 'wind' && (
+              <>
+                <label>
+                  range
+                  <select
+                    value={selected.range ?? 'full'}
+                    onChange={(e) =>
+                      updateWidget(selected.id, {
+                        range: e.target.value === 'close' ? 'close' : undefined
+                      })
+                    }
+                  >
+                    <option value="full">full circle</option>
+                    <option value="close">close-hauled (±60°)</option>
+                  </select>
+                </label>
+                <label>
+                  true wind
+                  <input
+                    type="checkbox"
+                    checked={selected.true_wind ?? true}
+                    onChange={(e) =>
+                      updateWidget(selected.id, {
+                        true_wind: e.target.checked ? undefined : false
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  target angle
+                  <input
+                    type="checkbox"
+                    checked={Boolean(selected.target_angle)}
+                    onChange={(e) =>
+                      updateWidget(selected.id, {
+                        target_angle: e.target.checked || undefined
+                      })
+                    }
+                  />
+                </label>
+              </>
+            )}
+            {selected.type === 'compass' && (
+              <>
+                <label>
+                  heading
+                  <select
+                    value={selected.heading_ref ?? 'magnetic'}
+                    onChange={(e) =>
+                      updateWidget(selected.id, {
+                        heading_ref:
+                          e.target.value === 'true' ? 'true' : undefined
+                      })
+                    }
+                  >
+                    <option value="magnetic">magnetic</option>
+                    <option value="true">true</option>
+                  </select>
+                </label>
+                {COMPASS_MARKERS.map((m) => {
+                  const markers = selected.markers ?? ['cog', 'waypoint']
+                  return (
+                    <label key={m.id}>
+                      {m.label}
+                      <input
+                        type="checkbox"
+                        checked={markers.includes(m.id)}
+                        onChange={(e) => {
+                          const next = COMPASS_MARKERS.map((c) => c.id).filter(
+                            (id) =>
+                              id === m.id
+                                ? e.target.checked
+                                : markers.includes(id)
+                          )
+                          const isDefault =
+                            next.length === 2 &&
+                            next.includes('cog') &&
+                            next.includes('waypoint')
+                          updateWidget(selected.id, {
+                            markers: isDefault ? undefined : next
+                          })
+                        }}
+                      />
+                    </label>
+                  )
+                })}
+              </>
+            )}
+            {selected.type === 'heel' && (
+              <label>
+                warn from (°)
+                <NumberField
+                  value={selected.warn_heel ?? 25}
+                  min={1}
+                  onChange={(n) => {
+                    const deg = Math.min(n, HEEL_SCALE_DEG)
+                    updateWidget(selected.id, {
+                      warn_heel: deg === 25 ? undefined : deg
+                    })
+                  }}
+                />
+              </label>
+            )}
+            {selected.type === 'rudder' && (
+              <label>
+                max (°)
+                <NumberField
+                  value={selected.max ?? 40}
+                  min={5}
+                  onChange={(n) => {
+                    const deg = Math.min(n, 90)
+                    updateWidget(selected.id, {
+                      max: deg === 40 ? undefined : deg
+                    })
+                  }}
+                />
+              </label>
+            )}
+            {(selected.type === 'wind' || selected.type === 'performance') && (
+              <>
+                <label>
+                  speed unit
+                  <input
+                    value={selected.display?.unit ?? 'kn'}
+                    onChange={(e) =>
+                      updateWidget(selected.id, {
+                        display: {
+                          ...(selected.display ?? {}),
+                          unit: e.target.value
+                        }
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  scale
+                  <NumberField
+                    value={selected.display?.scale ?? KNOTS_PER_MS}
+                    onChange={(n) =>
+                      updateWidget(selected.id, {
+                        display: { ...(selected.display ?? {}), scale: n }
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  decimals
+                  <input
+                    type="number"
+                    min={0}
+                    max={3}
+                    value={selected.display?.decimals ?? 1}
+                    onChange={(e) => {
+                      // The panel takes 0 to 3; an empty box while typing
+                      // must not round the speeds to whole knots.
+                      const n = e.target.valueAsNumber
+                      if (!Number.isInteger(n) || n < 0 || n > 3) return
+                      updateWidget(selected.id, {
+                        display: { ...(selected.display ?? {}), decimals: n }
+                      })
+                    }}
+                  />
+                </label>
+              </>
+            )}
             {/* Font size — applies to widgets whose primary text
                   is configurable (label, value, toggle caption).
                   Stand-alone so it works even for toggle, which
@@ -727,7 +930,12 @@ export function WidgetSheet(props: {
               selected.type !== 'bar' &&
               selected.type !== 'slider' &&
               selected.type !== 'toggle' &&
-              selected.type !== 'stream' && (
+              selected.type !== 'stream' &&
+              selected.type !== 'wind' &&
+              selected.type !== 'compass' &&
+              selected.type !== 'heel' &&
+              selected.type !== 'rudder' &&
+              selected.type !== 'performance' && (
                 <p className="muted small">
                   Nothing else to set for this widget here.
                 </p>

@@ -162,6 +162,56 @@ export const KIND_INFO: Record<WidgetKind, KindInfo> = {
       </>
     ),
     keywords: 'brightness dimmer setpoint'
+  },
+  wind: {
+    name: 'Wind',
+    icon: svg(
+      <>
+        <circle cx="12" cy="12" r="8" />
+        <path d="M12 4l-2 5h4zM6 12h1M17 12h1" />
+      </>
+    ),
+    keywords: 'wind angle awa twa close hauled sailing'
+  },
+  compass: {
+    name: 'Compass',
+    icon: svg(
+      <>
+        <circle cx="12" cy="12" r="8" />
+        <path d="M12 6l2 6-2 6-2-6z" />
+      </>
+    ),
+    keywords: 'heading cog bearing sailing'
+  },
+  heel: {
+    name: 'Heel',
+    icon: svg(
+      <>
+        <path d="M4 9a8 8 0 0 0 16 0" />
+        <path d="M12 17l3-9" />
+      </>
+    ),
+    keywords: 'heel roll inclinometer attitude sailing'
+  },
+  performance: {
+    name: 'Performance',
+    icon: svg(
+      <>
+        <path d="M5 17a8 8 0 1 1 14 0" />
+        <path d="M12 13l4-4" />
+      </>
+    ),
+    keywords: 'polar speed vmg target sailing'
+  },
+  rudder: {
+    name: 'Rudder',
+    icon: svg(
+      <>
+        <path d="M4 8a8 8 0 0 0 16 0" />
+        <path d="M12 4v8l3 6" />
+      </>
+    ),
+    keywords: 'rudder angle steering helm'
   }
 }
 

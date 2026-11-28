@@ -225,6 +225,45 @@ describe('slider widget', () => {
   })
 })
 
+describe('sailing widgets', () => {
+  it('round-trips a page of the five instruments with their options', () => {
+    const widgets: Widget[] = [
+      {
+        type: 'wind',
+        id: 'w',
+        x: 0,
+        y: 0,
+        w: 300,
+        h: 300,
+        range: 'close',
+        true_wind: false,
+        target_angle: true,
+        display: { unit: 'm/s', scale: 1, decimals: 1 }
+      },
+      {
+        type: 'compass',
+        id: 'c',
+        x: 300,
+        y: 0,
+        w: 300,
+        h: 300,
+        heading_ref: 'true',
+        markers: ['cog', 'wind']
+      },
+      { type: 'heel', id: 'h', x: 600, y: 0, w: 300, h: 220, warn_heel: 20 },
+      { type: 'performance', id: 'p', x: 0, y: 300, w: 300, h: 300 },
+      { type: 'rudder', id: 'r', x: 300, y: 300, w: 300, h: 220, max: 35 }
+    ]
+    const layout: Layout = {
+      schema: 1,
+      name: 'sail',
+      screens: [{ id: 'sail', title: 'Sail', widgets }]
+    }
+    expect(JSON.parse(JSON.stringify(layout))).toEqual(layout)
+    for (const w of widgets) expect('bind' in w).toBe(false)
+  })
+})
+
 describe('button null press_value', () => {
   it('accepts null press_value (raise-anchor button)', () => {
     const w: ButtonWidget = {
