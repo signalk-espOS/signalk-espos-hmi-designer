@@ -22,6 +22,10 @@ export type WidgetKind =
   | 'volume'
   | 'stream'
   | 'slider'
+  | 'tank'
+  | 'battery'
+  | 'lamp'
+  | 'trend'
 
 export interface DisplayConfig {
   unit?: string
@@ -283,6 +287,88 @@ export interface SliderWidget extends WidgetCommon {
   display?: DisplayConfig
 }
 
+/** Signal K tank types (tanks.<type>.<id>); the tank's fluid colour. */
+export type TankFluid =
+  | 'fuel'
+  | 'freshWater'
+  | 'blackWater'
+  | 'wasteWater'
+  | 'lubrication'
+  | 'liveWell'
+  | 'baitWell'
+  | 'gas'
+  | 'ballast'
+
+export const TANK_FLUIDS: readonly TankFluid[] = [
+  'fuel',
+  'freshWater',
+  'blackWater',
+  'wasteWater',
+  'lubrication',
+  'liveWell',
+  'baitWell',
+  'gas',
+  'ballast'
+]
+
+/** A tank's level (`currentLevel`, ratio 0..1) as a lit tube, a flat bar
+ *  or segments, with the percentage and, given a capacity, the volume.
+ *  `display` formats the volume from m³ (litres by default). */
+export interface TankWidget extends WidgetCommon {
+  type: 'tank'
+  bind: string
+  style?: 'tube' | 'flat' | 'segments'
+  /** Omitted: read from the path (`tanks.fuel.*` is fuel). */
+  fluid?: TankFluid
+  /** The capacity in m³, `tanks.<type>.<id>.capacity`. */
+  capacity_bind?: string
+  /** A fixed capacity in display units, for a tank the server does not
+   *  know the size of. */
+  capacity?: number
+}
+
+/** Battery body filled to the state of charge (`bind`, ratio 0..1), with
+ *  the voltage, current and time remaining of the binds that are set. */
+export interface BatteryWidget extends WidgetCommon {
+  type: 'battery'
+  bind: string
+  voltage_bind?: string
+  current_bind?: string
+  time_bind?: string
+}
+
+/** Lamp states, as Signal K notification states. */
+export type LampActive = 'normal' | 'alert' | 'warn' | 'alarm' | 'emergency'
+
+/** Round status light. A value path lights it while non-zero, in the
+ *  colour of `active`; a `notifications.*` path follows that
+ *  notification. Alarm and emergency blink. */
+export interface LampWidget extends WidgetCommon {
+  type: 'lamp'
+  bind: string
+  active?: LampActive
+}
+
+/** The reading large and its last `window_s` seconds as a line. */
+export interface TrendWidget extends WidgetCommon {
+  type: 'trend'
+  bind: string
+  /** Seconds the line spans, 60..86400 (device default 600). */
+  window_s?: number
+  /** Larger values lower, scale from 0: a depth trend. */
+  invert?: boolean
+  /** Fixed scale in display units; omitted, it follows the samples. */
+  min?: number
+  max?: number
+  /** Dashed line at this display value (a shoal depth). */
+  limit?: number
+  /** A second line on its own scale, in the accent colour. */
+  bind2?: string
+  display2?: DisplayConfig
+  /** Min, mean and max along the bottom (device default true). */
+  stats?: boolean
+}
+
 export type Widget =
   | LabelWidget
   | ValueWidget
@@ -300,6 +386,10 @@ export type Widget =
   | VolumeWidget
   | StreamWidget
   | SliderWidget
+  | TankWidget
+  | BatteryWidget
+  | LampWidget
+  | TrendWidget
 
 export interface Screen {
   id: string

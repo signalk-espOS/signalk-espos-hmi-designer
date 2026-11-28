@@ -162,6 +162,41 @@ export const KIND_INFO: Record<WidgetKind, KindInfo> = {
       </>
     ),
     keywords: 'brightness dimmer setpoint'
+  },
+  tank: {
+    name: 'Tank',
+    icon: svg(
+      <>
+        <rect x="7" y="3" width="10" height="18" rx="5" />
+        <path d="M7 13h10" />
+      </>
+    ),
+    keywords: 'level fuel water waste holding'
+  },
+  battery: {
+    name: 'Battery',
+    icon: svg(
+      <>
+        <rect x="3" y="7" width="16" height="10" rx="2" />
+        <path d="M21 10v4M11 9l-2 3h4l-2 3" />
+      </>
+    ),
+    keywords: 'soc charge voltage current bms'
+  },
+  lamp: {
+    name: 'Lamp',
+    icon: svg(
+      <>
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4" />
+      </>
+    ),
+    keywords: 'light led indicator status alarm'
+  },
+  trend: {
+    name: 'Trend',
+    icon: svg(<path d="M3 17l5-5 4 3 8-8M3 21h18" />),
+    keywords: 'history chart graph depth wind'
   }
 }
 

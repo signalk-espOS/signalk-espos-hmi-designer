@@ -1,11 +1,23 @@
 import React, { useRef } from 'react'
 import { colorForZoneState, isNestedBind, type MetaZone } from './api'
-import { NumberField } from './NumberField'
+import { NumberField, OptionalNumberField } from './NumberField'
 import { PathPicker } from './PathPicker'
 import type { PathInfo } from './pathSearch'
-import type { FontSizeOption, Widget, WidgetKind } from './schema'
+import {
+  TANK_FLUIDS,
+  type FontSizeOption,
+  type LampActive,
+  type TankFluid,
+  type Widget,
+  type WidgetKind
+} from './schema'
 import { UI_ICONS } from './uiIcons'
-import { bindsOf, PANEL_LOCAL_KINDS } from './widgetBinds'
+import {
+  bindsOf,
+  PANEL_LOCAL_KINDS,
+  siblingBinds,
+  type SideBindField
+} from './widgetBinds'
 import { KIND_INFO } from './widgetIcons'
 
 export type SheetTab = 'data' | 'display' | 'colors' | 'layout'
@@ -22,6 +34,14 @@ const TABS: ReadonlyArray<{ id: SheetTab; label: string }> = [
 export function kindHasData(kind: WidgetKind): boolean {
   return !PANEL_LOCAL_KINDS.has(kind) || kind === 'stream'
 }
+
+const LAMP_STATES: readonly LampActive[] = [
+  'normal',
+  'alert',
+  'warn',
+  'alarm',
+  'emergency'
+]
 
 /** A typed position or size as whole device pixels inside the panel. */
 function clampPx(n: number, min: number, max: number): number {
@@ -48,6 +68,11 @@ export function WidgetSheet(props: {
   updateWidget: (id: string, patch: Partial<Widget>) => void
   applyBind: (id: string, path: string) => void
   applyBarBind: (id: string, i: number, bind: string) => void
+  applySideBind: (
+    id: string,
+    field: SideBindField | 'bind2',
+    bind: string | undefined
+  ) => void
   onDuplicate: () => void
   onDelete: () => void
   onClose: () => void
@@ -64,7 +89,8 @@ export function WidgetSheet(props: {
     liveValue,
     updateWidget,
     applyBind,
-    applyBarBind
+    applyBarBind,
+    applySideBind
   } = props
   // Editor-only row keys for bargroup bars: an index key would hand an
   // open path search to the next bar when one is removed.
@@ -138,10 +164,180 @@ export function WidgetSheet(props: {
                     infoByPath={infoByPath}
                     recent={recent}
                     liveValue={liveValue(bind)}
-                    onChange={(p) => applyBind(selected.id, p)}
+                    onChange={(p) => {
+                      applyBind(selected.id, p)
+                      const side = siblingBinds(selected, p, knownPathSet)
+                      for (const [f, sp] of Object.entries(side))
+                        applySideBind(selected.id, f as SideBindField, sp)
+                    }}
                   />
                 </div>
               )}
+            {(() => {
+              const sidePath = (
+                label: string,
+                value: string | undefined,
+                onPick: (p: string) => void
+              ): React.JSX.Element => (
+                <div className="field" key={label}>
+                  <span className="field-label">{label}</span>
+                  <PathPicker
+                    value={value ?? ''}
+                    label={label}
+                    placeholder="optional"
+                    infos={infos}
+                    infoByPath={infoByPath}
+                    recent={recent}
+                    liveValue={value ? liveValue(value) : undefined}
+                    onChange={onPick}
+                  />
+                </div>
+              )
+              if (selected.type === 'tank')
+                return (
+                  <>
+                    <p className="muted small">
+                      The level as a ratio,
+                      tanks.&lt;type&gt;.&lt;id&gt;.currentLevel.
+                    </p>
+                    <label>
+                      fluid
+                      <select
+                        value={selected.fluid ?? ''}
+                        onChange={(e) =>
+                          updateWidget(selected.id, {
+                            fluid: (e.target.value || undefined) as
+                              TankFluid | undefined
+                          })
+                        }
+                      >
+                        <option value="">from the path</option>
+                        {TANK_FLUIDS.map((f) => (
+                          <option key={f} value={f}>
+                            {f}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {sidePath(
+                      'Capacity path (m³)',
+                      selected.capacity_bind,
+                      (p) => applySideBind(selected.id, 'capacity_bind', p)
+                    )}
+                    <label>
+                      fixed capacity
+                      <OptionalNumberField
+                        value={selected.capacity}
+                        placeholder="none"
+                        onChange={(v) =>
+                          updateWidget(selected.id, { capacity: v })
+                        }
+                      />
+                    </label>
+                    <p className="muted small">
+                      In the volume unit (Display tab, litres by default), for a
+                      tank the server has no capacity for.
+                    </p>
+                  </>
+                )
+              if (selected.type === 'battery')
+                return (
+                  <>
+                    <p className="muted small">
+                      State of charge as a ratio,
+                      electrical.batteries.&lt;id&gt;.capacity.stateOfCharge.
+                      Picking it fills in the paths below that the server has.
+                    </p>
+                    {sidePath('Voltage path', selected.voltage_bind, (p) =>
+                      applySideBind(selected.id, 'voltage_bind', p)
+                    )}
+                    {sidePath('Current path', selected.current_bind, (p) =>
+                      applySideBind(selected.id, 'current_bind', p)
+                    )}
+                    {sidePath('Time remaining path', selected.time_bind, (p) =>
+                      applySideBind(selected.id, 'time_bind', p)
+                    )}
+                  </>
+                )
+              if (selected.type === 'lamp')
+                return (
+                  <>
+                    <label>
+                      lit as
+                      <select
+                        value={selected.active ?? 'normal'}
+                        onChange={(e) => {
+                          const v = e.target.value as LampActive
+                          updateWidget(selected.id, {
+                            active: v === 'normal' ? undefined : v
+                          })
+                        }}
+                      >
+                        {LAMP_STATES.map((st) => (
+                          <option key={st} value={st}>
+                            {st}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <p className="muted small">
+                      A value path lights the lamp while it is not 0, in this
+                      state's colour; alarm and emergency blink. A
+                      notifications.* path follows that notification's own state
+                      instead.
+                    </p>
+                  </>
+                )
+              if (selected.type === 'trend')
+                return (
+                  <>
+                    <label>
+                      window (minutes)
+                      <NumberField
+                        value={(selected.window_s ?? 600) / 60}
+                        min={1}
+                        onChange={(m) =>
+                          updateWidget(selected.id, {
+                            window_s: Math.round(Math.min(1440, m) * 60)
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      invert (depth)
+                      <input
+                        type="checkbox"
+                        checked={selected.invert === true}
+                        onChange={(e) =>
+                          updateWidget(selected.id, {
+                            invert: e.target.checked || undefined
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      min, mean, max
+                      <input
+                        type="checkbox"
+                        checked={selected.stats ?? true}
+                        onChange={(e) =>
+                          updateWidget(selected.id, {
+                            stats: e.target.checked ? undefined : false
+                          })
+                        }
+                      />
+                    </label>
+                    {sidePath('Second line path', selected.bind2, (p) =>
+                      applySideBind(selected.id, 'bind2', p)
+                    )}
+                    <p className="muted small">
+                      The line starts when the panel shows the widget; it does
+                      not read the server's history.
+                    </p>
+                  </>
+                )
+              return null
+            })()}
             {selected.type === 'slider' && selected.bind === '@brightness' && (
               <p className="muted">
                 panel backlight, 5 to 100 %: the same setting as the brightness
@@ -631,11 +827,19 @@ export function WidgetSheet(props: {
                 </label>
               </>
             )}
+            {selected.type === 'tank' && (
+              <p className="muted small">
+                Formats the volume from the capacity in m³: scale 1000 and unit
+                l for litres, scale 264.172 and unit gal for US gallons.
+              </p>
+            )}
             {(selected.type === 'label' ||
               selected.type === 'value' ||
               selected.type === 'arc' ||
               selected.type === 'bar' ||
-              selected.type === 'slider') && (
+              selected.type === 'slider' ||
+              selected.type === 'tank' ||
+              selected.type === 'trend') && (
               <>
                 <label>
                   unit
@@ -721,12 +925,97 @@ export function WidgetSheet(props: {
                 </select>
               </label>
             )}
+            {selected.type === 'tank' && (
+              <label>
+                style
+                <select
+                  value={selected.style ?? 'tube'}
+                  onChange={(e) => {
+                    const v = e.target.value as 'tube' | 'flat' | 'segments'
+                    updateWidget(selected.id, {
+                      style: v === 'tube' ? undefined : v
+                    })
+                  }}
+                >
+                  <option value="tube">tube</option>
+                  <option value="flat">flat</option>
+                  <option value="segments">segments</option>
+                </select>
+              </label>
+            )}
+            {selected.type === 'trend' && (
+              <>
+                <label>
+                  min
+                  <OptionalNumberField
+                    value={selected.min}
+                    onChange={(v) => updateWidget(selected.id, { min: v })}
+                  />
+                </label>
+                <label>
+                  max
+                  <OptionalNumberField
+                    value={selected.max}
+                    onChange={(v) => updateWidget(selected.id, { max: v })}
+                  />
+                </label>
+                <label>
+                  limit line
+                  <OptionalNumberField
+                    value={selected.limit}
+                    placeholder="none"
+                    onChange={(v) => updateWidget(selected.id, { limit: v })}
+                  />
+                </label>
+                {selected.bind2 && (
+                  <>
+                    <label>
+                      second line unit
+                      <input
+                        type="text"
+                        value={selected.display2?.unit ?? ''}
+                        onChange={(e) =>
+                          updateWidget(selected.id, {
+                            display2: {
+                              ...(selected.display2 ?? {}),
+                              unit: e.target.value
+                            }
+                          })
+                        }
+                      />
+                    </label>
+                    {(['scale', 'offset', 'decimals'] as const).map((k) => (
+                      <label key={k}>
+                        second line {k}
+                        <NumberField
+                          value={
+                            selected.display2?.[k] ??
+                            (k === 'scale' ? 1 : k === 'offset' ? 0 : 1)
+                          }
+                          min={k === 'decimals' ? 0 : undefined}
+                          onChange={(v) =>
+                            updateWidget(selected.id, {
+                              display2: {
+                                ...(selected.display2 ?? {}),
+                                [k]: k === 'decimals' ? Math.round(v) : v
+                              }
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                  </>
+                )}
+              </>
+            )}
             {selected.type !== 'label' &&
               selected.type !== 'value' &&
               selected.type !== 'arc' &&
               selected.type !== 'bar' &&
               selected.type !== 'slider' &&
               selected.type !== 'toggle' &&
+              selected.type !== 'tank' &&
+              selected.type !== 'trend' &&
               selected.type !== 'stream' && (
                 <p className="muted small">
                   Nothing else to set for this widget here.

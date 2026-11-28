@@ -35,7 +35,7 @@ import { Popover } from './Popover'
 import { fitTabs } from './fitTabs'
 import { formatPathValue, type PathInfo } from './pathSearch'
 import { UI_ICONS } from './uiIcons'
-import { bindsOf } from './widgetBinds'
+import { bindsOf, type SideBindField } from './widgetBinds'
 import { WidgetSheet, kindHasData, type SheetTab } from './WidgetSheet'
 import { KIND_INFO, kindMatches } from './widgetIcons'
 import {
@@ -306,6 +306,31 @@ function defaultWidget(
         // decimals:1 (not 0) so a bound path's nonzero metadata precision
         // isn't blocked by applyBind's merge sentinel below, which treats
         // 1 as "still default" and 0 as "user set".
+        display: { unit: '', scale: 1, offset: 0, decimals: 1 }
+      }
+    case 'tank':
+      // The volume reads in litres from Signal K's m³.
+      return {
+        ...base,
+        type: 'tank',
+        w: 120,
+        h: 240,
+        bind: '',
+        style: 'tube',
+        display: { unit: 'l', scale: 1000, offset: 0, decimals: 0 }
+      }
+    case 'battery':
+      return { ...base, type: 'battery', w: 280, h: 200, bind: '' }
+    case 'lamp':
+      return { ...base, type: 'lamp', w: 120, h: 120, bind: '' }
+    case 'trend':
+      return {
+        ...base,
+        type: 'trend',
+        w: 320,
+        h: 220,
+        bind: '',
+        window_s: 600,
         display: { unit: '', scale: 1, offset: 0, decimals: 1 }
       }
   }
@@ -893,7 +918,13 @@ export function App(): React.JSX.Element {
   // renders.
   const wantsNotifications = useMemo(
     () =>
-      screens.some((s) => s.widgets.some((w) => w.type === 'notifications')),
+      screens.some((s) =>
+        s.widgets.some(
+          (w) =>
+            w.type === 'notifications' ||
+            (w.type === 'lamp' && w.bind.startsWith('notifications.'))
+        )
+      ),
     [screens]
   )
   const wantsCleared = useMemo(
@@ -1189,6 +1220,7 @@ export function App(): React.JSX.Element {
             w.type !== 'arc' &&
             w.type !== 'bar' &&
             w.type !== 'slider' &&
+            w.type !== 'trend' &&
             w.type !== 'button'
           ) {
             return w
@@ -1276,6 +1308,54 @@ export function App(): React.JSX.Element {
             }
           })
           return { ...wid, bars: bars2 }
+        })
+      }))
+    })
+  }
+
+  // A level widget's second path: its zones and description like any
+  // bind, and for a trend's second line the display fields, filled only
+  // where still empty.
+  const applySideBind = (
+    id: string,
+    field: SideBindField | 'bind2',
+    bind: string | undefined
+  ): void => {
+    updateWidget(id, { [field]: bind || undefined } as Partial<Widget>)
+    if (!bind) return
+    const { skPath } = resolveBindPath(bind, paths)
+    void fetchPathMeta(skPath).then((meta) => {
+      if (!meta) return
+      const zones = meta.zones
+      if (zones && zones.length > 0)
+        setPathZones((prev) => new Map(prev).set(bind, zones))
+      const description = meta.description
+      if (description)
+        setPathDescriptions((prev) => new Map(prev).set(bind, description))
+      if (field !== 'bind2') return
+      const d = deriveDisplayDefaults(meta)
+      if (!d) return
+      setScreen((prev) => ({
+        ...prev,
+        widgets: prev.widgets.map((w) => {
+          if (w.id !== id || w.type !== 'trend' || w.bind2 !== bind) return w
+          const cur = w.display2 ?? {}
+          return {
+            ...w,
+            display2: {
+              ...cur,
+              unit: cur.unit ? cur.unit : d.unit,
+              scale:
+                cur.scale !== undefined && cur.scale !== 1
+                  ? cur.scale
+                  : d.scale,
+              offset:
+                cur.offset !== undefined && cur.offset !== 0
+                  ? cur.offset
+                  : d.offset,
+              decimals: cur.decimals ?? d.decimals
+            }
+          }
         })
       }))
     })
@@ -1562,6 +1642,7 @@ export function App(): React.JSX.Element {
                     wid.type !== 'arc' &&
                     wid.type !== 'bar' &&
                     wid.type !== 'slider' &&
+                    wid.type !== 'trend' &&
                     wid.type !== 'button'
                   ) {
                     return wid
@@ -1882,7 +1963,11 @@ export function App(): React.JSX.Element {
         'mic',
         'volume',
         'stream',
-        'slider'
+        'slider',
+        'tank',
+        'battery',
+        'lamp',
+        'trend'
       ]
     return Object.keys(hello.widgets).filter(
       (k): k is WidgetKind =>
@@ -1901,7 +1986,11 @@ export function App(): React.JSX.Element {
         k === 'mic' ||
         k === 'volume' ||
         k === 'stream' ||
-        k === 'slider'
+        k === 'slider' ||
+        k === 'tank' ||
+        k === 'battery' ||
+        k === 'lamp' ||
+        k === 'trend'
     )
   }, [hello])
 
@@ -3459,6 +3548,7 @@ export function App(): React.JSX.Element {
             updateWidget={updateWidget}
             applyBind={applyBind}
             applyBarBind={applyBarBind}
+            applySideBind={applySideBind}
             onDuplicate={() => duplicateWidget(selected.id)}
             onDelete={() => removeWidget(selected.id)}
             onClose={() => setSheetOpen(false)}
